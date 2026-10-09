@@ -68,8 +68,10 @@ def transcript_for_prompt(words: List[Word], sents) -> str:
 
 
 def select_clips_ai(g: Gemini, words: List[Word], count: int, min_s: int, max_s: int,
-                    lang: str, log: Callable[[str], None] = print) -> List[Clip]:
+                    lang: str, log: Callable[[str], None] = print, user_prompt: str = "") -> List[Clip]:
     sents = split_sentences(words)
+    extra = (f"\nINSTRUKSI KHUSUS DARI PENGGUNA (utamakan, selama aturan wajib tetap dipenuhi): "
+             f"{user_prompt.strip()}\n") if user_prompt.strip() else ""
     prompt = f"""Kamu editor video pendek viral (TikTok/Reels/Shorts) yang sangat teliti.
 Dari transkrip di bawah (bahasa: {lang_name(lang)}), pilih {count} momen TERBAIK untuk dijadikan klip.
 
@@ -90,10 +92,13 @@ Untuk setiap klip berikan:
 - thumb_text: 2-4 kata untuk thumbnail, KAPITAL, impactful
 - caption: caption sosial media 1-2 kalimat
 - hashtags: 4-6 hashtag (tanpa spasi)
-- score: 0-100 potensi viral
+- score: 0-100 potensi viral keseluruhan
+- hook_score, flow_score, value_score, trend_score: masing-masing 0-100 (kekuatan hook pembuka, alur/ketuntasan cerita,
+  nilai/insight bagi penonton, kesesuaian tren & emosi)
 - reason: 1 kalimat alasan
 - complete: true bila klip berakhir tuntas (kamu yakin pembahasan selesai)
 
+{extra}
 Jawab HANYA JSON: {{"clips":[{{...}}]}}, bahasa teks = {lang_name(lang)}.
 
 TRANSKRIP:
@@ -112,6 +117,8 @@ TRANSKRIP:
             title=str(c.get("title", "")), hook=str(c.get("hook", "")),
             thumb_text=str(c.get("thumb_text", "")), caption=str(c.get("caption", "")),
             hashtags=[str(h) for h in c.get("hashtags", [])], score=float(c.get("score", 0) or 0),
+            score_hook=float(c.get("hook_score", 0) or 0), score_flow=float(c.get("flow_score", 0) or 0),
+            score_value=float(c.get("value_score", 0) or 0), score_trend=float(c.get("trend_score", 0) or 0),
             reason=str(c.get("reason", ""))))
     return clips
 

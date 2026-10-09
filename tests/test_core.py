@@ -222,3 +222,35 @@ def test_branding_overlays():
     assert "WATCH FULL VIDEO" in text and "Channel Saya" in text and "CHANNEL+" in text
     assert "Style: Plain" in text and "\\p1" in text
     assert "Channel" not in subtitles.build_ass(ws, Style(sub_enabled=False), 1080, 1920, 5.0)[0]
+
+
+def test_library_templates_and_projects(tmp_path, monkeypatch):
+    from clipper import library, paths
+    monkeypatch.setattr(paths, "data_dir", lambda: tmp_path)
+    monkeypatch.setattr(library, "data_dir", lambda: tmp_path)
+    st = Style(sub_font="Anton", sub_size=99)
+    library.save_template("Merek Saya", st)
+    assert "Merek Saya" in library.list_templates()
+    assert library.load_template("Merek Saya").sub_size == 99
+    library.delete_template("Merek Saya")
+    assert library.list_templates() == []
+    lf = tmp_path / "list_clip.json"
+    lf.write_text("{}")
+    library.register_project(lf, Path("/x/video.mp4"), 3)
+    library.register_project(lf, Path("/x/video.mp4"), 4)   # tidak duplikat
+    ps = library.list_projects()
+    assert len(ps) == 1 and ps[0]["clips"] == 4
+
+
+def test_ai_scores_and_user_prompt():
+    ws = mk("kalimat satu selesai. kalimat dua juga selesai.", 0.0)
+    g = FakeGemini({"clips": [{"start_sentence": 0, "end_sentence": 1, "title": "T", "score": 80,
+                               "hook_score": 90, "flow_score": 70, "value_score": 60, "trend_score": 50}]})
+    c = ai.select_clips_ai(g, ws, 1, 1, 30, "id", user_prompt="cari momen lucu")[0]
+    assert (c.score_hook, c.score_flow, c.score_value, c.score_trend) == (90, 70, 60, 50)
+    assert "cari momen lucu" in g.prompts[0]
+
+
+def test_scaled_style():
+    s = Style().scaled(1 / 3)
+    assert s.out_width == 360 and s.out_height == 640 and s.sub_size == 28

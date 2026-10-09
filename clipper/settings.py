@@ -19,6 +19,7 @@ class Settings:
     min_sec: int = 30
     max_sec: int = 75
     output_dir: str = ""
+    clip_prompt: str = ""             # instruksi kustom untuk pencarian klip
     use_gemini_polish: bool = True
     make_thumbnail: bool = True
     last_source: str = ""

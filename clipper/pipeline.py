@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, List, Optional
 
-from . import ai, media, paths
+from . import ai, library, media, paths
 from .models import Clip, Word
 from .settings import Settings
 from .textproc import fmt_time
@@ -90,7 +90,7 @@ class Pipeline:
             raise RuntimeError("Tidak ada ucapan terdeteksi di video ini.")
         self._check()
         params = {"count": cfg.clip_count, "min": cfg.min_sec, "max": cfg.max_sec,
-                  "model": cfg.gemini_model, "whisper": cfg.whisper_model}
+                  "model": cfg.gemini_model, "whisper": cfg.whisper_model, "prompt": cfg.clip_prompt.strip()}
         proj = Project(video, pdir, lang, words)
         if use_cache and proj.list_file.exists():
             try:
@@ -98,6 +98,7 @@ class Pipeline:
                 if d.get("params") == params:
                     proj.clips = [Clip.from_dict(c) for c in d["clips"]]
                     self.log("Daftar klip dimuat dari cache (list_clip.json) - hemat kuota Gemini.")
+                    library.register_project(proj.list_file, video, len(proj.clips))
                     self.progress(1.0, "Selesai")
                     return proj
             except Exception:
@@ -106,7 +107,8 @@ class Pipeline:
         if cfg.api():
             self.log(f"Gemini ({cfg.gemini_model}) menganalisis transkrip...")
             g = ai.Gemini(cfg.api(), cfg.gemini_model)
-            clips = ai.select_clips_ai(g, words, cfg.clip_count, cfg.min_sec, cfg.max_sec, lang, self.log)
+            clips = ai.select_clips_ai(g, words, cfg.clip_count, cfg.min_sec, cfg.max_sec, lang, self.log,
+                                       cfg.clip_prompt)
         else:
             self.log("API key Gemini kosong - memakai pemilihan lokal sederhana.")
             clips = ai.select_clips_local(words, cfg.clip_count, cfg.min_sec, cfg.max_sec)
@@ -116,6 +118,7 @@ class Pipeline:
             c.id = n
         proj.clips = clips
         proj.save(params)
+        library.register_project(proj.list_file, video, len(clips))
         self.log(f"{len(clips)} klip ditemukan.")
         self.progress(1.0, "Selesai")
         return proj
@@ -128,6 +131,21 @@ class Pipeline:
         proj = Project(Path(d["video"]), pdir, d.get("language", t.get("language", "en")),
                        [Word(**w) for w in t["words"]], [Clip.from_dict(c) for c in d["clips"]])
         return proj
+
+    # ---------------------------------------------------------------- pratinjau cepat
+    def preview(self, proj: Project, clip: Clip) -> Path:
+        """Render cepat resolusi rendah (tanpa Gemini/voice/thumbnail) untuk dicek sebelum ekspor."""
+        from .render import finish_render, prepare_clip
+        st = self.cfg.style.scaled(360 / max(self.cfg.style.out_width, 1))
+        st.loudnorm = False
+        work = proj.dir / "work_preview"
+        out_dir = proj.dir / "preview"
+        out_dir.mkdir(exist_ok=True)
+        prep = prepare_clip(proj.video, clip, proj.words, st, work, self.log)
+        out = out_dir / f"preview_clip{clip.id:02d}.mp4"
+        finish_render(proj.video, clip, prep, prep["rwords"], st, out, work, None, st.hook_seconds, clip.hook,
+                      self.log, lambda p: self.progress(p, f"Pratinjau klip {clip.id}"), quick=True)
+        return out
 
     # ---------------------------------------------------------------- render
     def render(self, proj: Project, clips: List[Clip]) -> List[Path]:

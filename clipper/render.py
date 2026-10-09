@@ -21,7 +21,7 @@ Log = Callable[[str], None]
 
 # ------------------------------------------------------------------ tahap 1: potong
 def cut_segments(src: Path, segs: List[Tuple[float, float]], out: Path, fps: int, has_audio: bool,
-                 work: Path) -> None:
+                 work: Path, quick: bool = False) -> None:
     base = max(0.0, segs[0][0] - 1.0)
     parts, cv, ca = [], [], []
     for k, (a, b) in enumerate(segs):
@@ -37,14 +37,15 @@ def cut_segments(src: Path, segs: List[Tuple[float, float]], out: Path, fps: int
     n = len(segs)
     inter = "".join(f"{v}{a}" for v, a in zip(cv, ca)) if has_audio else "".join(cv)
     parts.append(f"{inter}concat=n={n}:v=1:a={1 if has_audio else 0}[vc]" + ("[ac]" if has_audio else ""))
-    parts.append("[vc]scale=-2:'min(1080,ih)':flags=bicubic,format=yuv420p[vo]")
+    parts.append(f"[vc]scale=-2:'min({480 if quick else 1080},ih)':flags=bicubic,format=yuv420p[vo]")
     script = work / "cut_filter.txt"
     script.write_text(";\n".join(parts), encoding="utf-8")
     cmd = [paths.ffmpeg(), "-y", "-ss", f"{base:.3f}", "-i", str(src),
            "-filter_complex_script", str(script), "-map", "[vo]"]
     if has_audio:
         cmd += ["-map", "[ac]", "-c:a", "aac", "-b:a", "256k"]
-    cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "12", "-pix_fmt", "yuv420p", str(out)]
+    cmd += ["-c:v", "libx264", "-preset", "ultrafast" if quick else "veryfast", "-crf", "26" if quick else "12",
+            "-pix_fmt", "yuv420p", str(out)]
     run(cmd)
 
 
@@ -131,7 +132,7 @@ def logo_xy(col: int, row: int) -> Tuple[str, str]:
 
 def build_final_cmd(stage1: Path, out: Path, st: Style, W: int, H: int, fps: float, duration: float,
                     has_audio: bool, ass_name: Optional[str], fontsdir: Optional[str],
-                    voice: Optional[Path], hook_sec: float) -> list:
+                    voice: Optional[Path], hook_sec: float, quick: bool = False) -> list:
     cmd = [paths.ffmpeg(), "-y", "-f", "rawvideo", "-pix_fmt", "bgr24", "-s", f"{W}x{H}",
            "-r", f"{fps:.4f}", "-i", "-", "-i", str(stage1)]
     idx = 2
@@ -182,18 +183,23 @@ def build_final_cmd(stage1: Path, out: Path, st: Style, W: int, H: int, fps: flo
     cmd += ["-filter_complex", graph_text, "-map", f"[{last}]"]
     if amap:
         cmd += ["-map", amap, "-c:a", "aac", "-b:a", "192k"]
-    cmd += ["-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p",
+    cmd += ["-c:v", "libx264", "-preset", "ultrafast" if quick else "medium", "-crf", "30" if quick else "18",
+            "-pix_fmt", "yuv420p",
             "-movflags", "+faststart", "-t", f"{duration:.3f}", str(out)]
     return cmd
 
 
 # ------------------------------------------------------------------ utama
+def quick_fps(st: Style) -> bool:
+    return st.out_width < 540
+
+
 def prepare_clip(src: Path, clip: Clip, words: List[Word], st: Style, work: Path,
                  log: Log = print) -> dict:
     """Tahap awal: tentukan segmen yang dipertahankan (jeda & filler dibuang) + remap kata."""
     work.mkdir(parents=True, exist_ok=True)
     info = probe(str(src))
-    fps = float(st.fps)
+    fps = 24.0 if quick_fps(st) else float(st.fps)
     W, H = st.out_width, st.out_height
 
     if st.cut_silence or st.remove_fillers:
@@ -211,10 +217,11 @@ def prepare_clip(src: Path, clip: Clip, words: List[Word], st: Style, work: Path
 
 def finish_render(src: Path, clip: Clip, prep: dict, rwords: List[Word], st: Style, out: Path,
                   work: Path, voice_file: Optional[Path], hook_seconds: float, hook_text: str,
-                  log: Log = print, progress: Optional[Callable[[float], None]] = None) -> dict:
+                  log: Log = print, progress: Optional[Callable[[float], None]] = None,
+                  quick: bool = False) -> dict:
     info, segs, fps, W, H = prep["info"], prep["segs"], prep["fps"], prep["W"], prep["H"]
     stage1 = work / f"clip{clip.id}_cut.mp4"
-    cut_segments(src, segs, stage1, int(fps), info["has_audio"], work)
+    cut_segments(src, segs, stage1, int(fps), info["has_audio"], work, quick)
     s1 = probe(str(stage1))
     duration = s1["duration"]
     sw, sh = s1["width"], s1["height"]
@@ -251,7 +258,7 @@ def finish_render(src: Path, clip: Clip, prep: dict, rwords: List[Word], st: Sty
             fontsdir_rel = "fonts"
 
     cmd = build_final_cmd(stage1, out, st, W, H, fps, duration, info["has_audio"], ass_name,
-                          fontsdir_rel, voice_file, hook_seconds)
+                          fontsdir_rel, voice_file, hook_seconds, quick)
     log("  Merender video final...")
     errlog = work / f"clip{clip.id}_ffmpeg.log"
     cap = cv2.VideoCapture(str(stage1))

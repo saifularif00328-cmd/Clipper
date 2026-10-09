@@ -25,6 +25,10 @@ class Clip:
     caption: str = ""
     hashtags: list = field(default_factory=list)
     score: float = 0.0
+    score_hook: float = 0.0
+    score_flow: float = 0.0
+    score_value: float = 0.0
+    score_trend: float = 0.0
     reason: str = ""
     selected: bool = True
 
@@ -107,6 +111,14 @@ class Style:
 
     def to_dict(self):
         return asdict(self)
+
+    def scaled(self, k: float) -> "Style":
+        """Salinan dengan ukuran piksel diskalakan (untuk pratinjau resolusi rendah)."""
+        d = self.to_dict()
+        for f in ("sub_size", "hook_size", "sub_inner_w", "sub_outer_w", "wm_size"):
+            d[f] = max(int(round(d[f] * k)), 1)
+        d["out_width"], d["out_height"] = int(self.out_width * k) // 2 * 2, int(self.out_height * k) // 2 * 2
+        return Style.from_dict(d)
 
     @staticmethod
     def from_dict(d: dict) -> "Style":
