@@ -254,3 +254,81 @@ def test_ai_scores_and_user_prompt():
 def test_scaled_style():
     s = Style().scaled(1 / 3)
     assert s.out_width == 360 and s.out_height == 640 and s.sub_size == 28
+
+
+def test_heatmap_parsing_and_average(tmp_path):
+    import wave
+    import numpy as np
+    from clipper import heatmap
+    h = heatmap.from_youtube([{"start_time": 0, "end_time": 10, "value": 0.2},
+                              {"start_time": 10, "end_time": 20, "value": 1.0}])
+    assert h[1]["value"] == 1.0 and abs(h[0]["value"] - 0.2) < 1e-6
+    assert heatmap.average(h, 5, 15) == (5 * 0.2 + 5 * 1.0) / 10
+    assert heatmap.from_youtube(None) == [] and heatmap.from_youtube([{"x": 1}]) == []
+    sr = 16000
+    sig = np.r_[np.zeros(sr * 2), (np.sin(np.arange(sr * 2) / 5) * 20000)].astype(np.int16)
+    f = tmp_path / "a.wav"
+    with wave.open(str(f), "wb") as w:
+        w.setnchannels(1); w.setsampwidth(2); w.setframerate(sr); w.writeframes(sig.tobytes())
+    ha = heatmap.from_audio(f, 2.0)
+    assert ha[0]["value"] < 0.05 and ha[1]["value"] > 0.9
+
+
+def test_heat_tags_and_title_rule_in_prompt():
+    ws = mk("kalimat satu selesai. kalimat dua juga selesai.", 0.0)
+    g = FakeGemini({"clips": [{"start_sentence": 0, "end_sentence": 1, "title": "T"}]})
+    heat = [{"start": 0, "end": 100, "value": 0.95}]
+    ai.select_clips_ai(g, ws, 1, 1, 30, "id", heat=heat, channel="Podcast X")
+    p = g.prompts[0]
+    assert " i9]" in p and "orang pertama" in p and "Podcast X" in p
+
+
+def test_local_selector_prefers_hot_segment():
+    ws = mk("a b c d e f g h. i j k l m n o p. q r s t u v w x.", 0.0, dur=1.0, gap=0.0)
+    cold = ai.select_clips_local(ws, 1, 8, 8)
+    heat = [{"start": 16, "end": 24, "value": 1.0}]
+    hot = ai.select_clips_local(ws, 1, 8, 8, heat)
+    assert hot[0].start >= 16 and hot[0].start != cold[0].start or cold[0].start >= 16
+
+
+def test_encoder_args_and_resolution(monkeypatch):
+    from clipper import encoders
+    monkeypatch.setattr(encoders, "available", lambda: {"nvenc": False, "qsv": True, "amf": False, "videotoolbox": False})
+    assert encoders.resolve("auto") == "qsv" and encoders.resolve("cpu") == "cpu" and encoders.resolve("zzz") == "cpu"
+    assert "h264_nvenc" in encoders.video_args("nvenc") and "libx264" in encoders.video_args("cpu")
+    monkeypatch.setattr(encoders, "available", lambda: {k: False for k in encoders.CODEC})
+    assert encoders.resolve("auto") == "cpu"
+
+
+def test_final_cmd_audio_layers(tmp_path):
+    from clipper.render import build_final_cmd
+    bgm, sfx = tmp_path / "m.mp3", tmp_path / "s.wav"
+    bgm.write_bytes(b"x"); sfx.write_bytes(b"x")
+    st = Style(bgm_path=str(bgm), bgm_volume=20, sfx_path=str(sfx), voice_volume=80)
+    cmd = build_final_cmd(tmp_path / "c.mp4", tmp_path / "o.mp4", st, 1080, 1920, 30, 10.0, True, None, None, None, 3.0)
+    g = cmd[cmd.index("-filter_complex") + 1]
+    assert "-stream_loop" in cmd and "amix=inputs=3" in g and "volume=0.200" in g and "volume=0.800" in g
+    quick = build_final_cmd(tmp_path / "c.mp4", tmp_path / "o.mp4", st, 360, 640, 24, 10.0, True, None, None, None, 3.0, True)
+    assert "amix" not in quick[quick.index("-filter_complex") + 1]  # pratinjau cepat tanpa musik
+    cmd = build_final_cmd(tmp_path / "c.mp4", tmp_path / "o.mp4", Style(), 1080, 1920, 30, 10.0, False, None, None, None, 3.0)
+    assert "-map" in cmd and "aout" not in " ".join(cmd)   # tanpa audio sama sekali
+
+
+def test_split_framer_shape():
+    import numpy as np
+    from clipper.render import Framer
+    f = Framer(1920, 1080, 1080, 1920, "split")
+    out = f(np.zeros((1080, 1920, 3), np.uint8), 500, 400, 1.0)
+    assert out.shape == (1920, 1080, 3)
+    sq = Framer(1920, 1080, 1080, 1080, "face")(np.zeros((1080, 1920, 3), np.uint8), 960, 540, 1.0)
+    assert sq.shape == (1080, 1080, 3)
+
+
+def test_zip_results(tmp_path):
+    from clipper.pipeline import Pipeline, Project
+    (tmp_path / "clips").mkdir()
+    for n in ("a.mp4", "a.txt", "a_thumb_vertical.jpg", "skip.log"):
+        (tmp_path / "clips" / n).write_bytes(b"x")
+    import zipfile
+    z = Pipeline.zip_results(Project(Path("v.mp4"), tmp_path, "id", []))
+    assert sorted(zipfile.ZipFile(z).namelist()) == ["a.mp4", "a.txt", "a_thumb_vertical.jpg"]

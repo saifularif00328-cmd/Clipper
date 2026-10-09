@@ -31,12 +31,16 @@ class Gemini:
         self.client = genai.Client(api_key=api_key)
         self.model = model
 
+    FALLBACKS = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-flash-lite"]
+
     def json_call(self, prompt: str, retries: int = 3):
+        """Coba model pilihan dulu; bila gagal (kuota/overload) beralih ke model cadangan."""
+        chain = [self.model] * 2 + [m for m in self.FALLBACKS if m != self.model]
         last = None
-        for i in range(retries):
+        for i, model in enumerate(chain[:max(retries, 2) + len(self.FALLBACKS)]):
             try:
                 r = self.client.models.generate_content(
-                    model=self.model, contents=prompt,
+                    model=model, contents=prompt,
                     config=self._types.GenerateContentConfig(
                         response_mime_type="application/json", temperature=0.4))
                 return parse_json(r.text)
@@ -59,17 +63,28 @@ def parse_json(text: str):
 
 
 # ---------------------------------------------------------------- pemilihan klip
-def transcript_for_prompt(words: List[Word], sents) -> str:
+def transcript_for_prompt(words: List[Word], sents, heat=None) -> str:
+    from . import heatmap
     lines = []
     for n, (a, b) in enumerate(sents):
         txt = " ".join(w.text for w in words[a:b + 1])
-        lines.append(f"[S{n} {fmt_time(words[a].start)}-{fmt_time(words[b].end)}] {txt}")
+        tag = ""
+        if heat:
+            tag = f" i{min(int(heatmap.average(heat, words[a].start, words[b].end) * 9.99), 9)}"
+        lines.append(f"[S{n} {fmt_time(words[a].start)}-{fmt_time(words[b].end)}{tag}] {txt}")
     return "\n".join(lines)
 
 
 def select_clips_ai(g: Gemini, words: List[Word], count: int, min_s: int, max_s: int,
-                    lang: str, log: Callable[[str], None] = print, user_prompt: str = "") -> List[Clip]:
+                    lang: str, log: Callable[[str], None] = print, user_prompt: str = "", heat=None,
+                    channel: str = "") -> List[Clip]:
     sents = split_sentences(words)
+    heat_note = ("\nSINYAL MINAT PENONTON: tiap kalimat diberi tag i0-i9 (i9 = bagian yang paling banyak diputar ulang/"
+                 "paling berenergi). Utamakan momen ber-minat tinggi, TETAPI tetap harus tuntas & utuh.\n") if heat else ""
+    who = channel or "pembicara/host"
+    title_rule = (f"\nATURAN JUDUL & HOOK: JANGAN memakai sudut pandang orang pertama ('saya', 'aku', 'gue', 'I', 'my'). "
+                  f"Pengguna adalah kurator pihak ketiga, bukan pembicara. Sebut nama/peran pembicara (mis. {who}) "
+                  "atau pakai kalimat netral yang memancing rasa penasaran.\n")
     extra = (f"\nINSTRUKSI KHUSUS DARI PENGGUNA (utamakan, selama aturan wajib tetap dipenuhi): "
              f"{user_prompt.strip()}\n") if user_prompt.strip() else ""
     prompt = f"""Kamu editor video pendek viral (TikTok/Reels/Shorts) yang sangat teliti.
@@ -98,11 +113,11 @@ Untuk setiap klip berikan:
 - reason: 1 kalimat alasan
 - complete: true bila klip berakhir tuntas (kamu yakin pembahasan selesai)
 
-{extra}
+{heat_note}{title_rule}{extra}
 Jawab HANYA JSON: {{"clips":[{{...}}]}}, bahasa teks = {lang_name(lang)}.
 
 TRANSKRIP:
-{transcript_for_prompt(words, sents)}"""
+{transcript_for_prompt(words, sents, heat)}"""
     data = g.json_call(prompt)
     raw = data["clips"] if isinstance(data, dict) else data
     clips: List[Clip] = []
@@ -202,7 +217,7 @@ def polish_and_translate(g: Gemini, clip: Clip, words: List[Word], src_lang: str
 
 
 # ---------------------------------------------------------------- tanpa AI
-def select_clips_local(words: List[Word], count: int, min_s: int, max_s: int) -> List[Clip]:
+def select_clips_local(words: List[Word], count: int, min_s: int, max_s: int, heat=None) -> List[Clip]:
     """Cadangan tanpa API: jendela kalimat dengan kepadatan bicara & tanda seru/tanya tertinggi."""
     sents = split_sentences(words)
     if not sents:
@@ -226,7 +241,9 @@ def select_clips_local(words: List[Word], count: int, min_s: int, max_s: int) ->
         seg = words[sents[i][0]:sents[j][1] + 1]
         dens = len(seg) / max(b - a, 1)
         punct = sum(w.text.endswith(("!", "?")) for w in seg)
-        cands.append((dens + 0.4 * punct, i, j, a, b))
+        from . import heatmap
+        hscore = 3.0 * heatmap.average(heat, a, b) if heat else 0.0
+        cands.append((dens + 0.4 * punct + hscore, i, j, a, b))
     cands.sort(reverse=True)
     chosen, clips = [], []
     for sc, i, j, a, b in cands:

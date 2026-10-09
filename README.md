@@ -20,6 +20,12 @@ yang dikirim ke Gemini (opsional, API key gratis dari <https://aistudio.google.c
 | 10 | **Potong jeda otomatis** | Jeda > ambang (default 0,45 s) dan filler "eee/aaa/emm/uh/um" dibuang dari video *dan* audio; subtitle ikut dipetakan ulang. |
 | 11 | **Hook stop-scroll** | Headline animasi di awal + voice-over opsional (edge-tts, suara per bahasa). |
 | 12 | **Thumbnail otomatis** | Frame terbaik (wajah jelas, tajam) + teks double stroke → 9:16 dan 16:9. |
+| 15 | **Heatmap minat penonton** | Sinyal "paling banyak diputar ulang" YouTube (atau energi audio untuk file lokal) dikirim ke Gemini sebagai tag `i0–i9` per kalimat, dan dipakai pemilih lokal. |
+| 16 | **Akselerasi GPU** | NVENC / QSV / AMF / VideoToolbox dideteksi dengan uji-encode; bila gagal otomatis kembali ke CPU. |
+| 17 | **Audio tambahan** | Musik latar (loop + fade), SFX hook, volume suara asli, voice-over hook dengan ducking. |
+| 18 | **Layout** | Face Tracking, Split Cam (wajah atas / konten bawah), Crop Tengah, Fit + Blur; rasio 9:16, 1:1, 16:9. |
+| 19 | **Akses YouTube** | Cookies (file / dari browser) dan proxy untuk unduhan; pembaruan yt-dlp dari dalam aplikasi. |
+| 20 | **Proyek & template** | Riwayat proyek, template merek tersimpan, pratinjau cepat, kemas ZIP, cadangan model Gemini otomatis. |
 | 14 | **Efek** | Zoom punch-in saat penekanan, slow zoom, progress bar, fade, color grade, vignette, latar blur. |
 
 ## Menjalankan dari source

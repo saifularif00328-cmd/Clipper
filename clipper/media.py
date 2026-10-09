@@ -95,7 +95,8 @@ def update_ytdlp(log: LogFn = print) -> str:
     return latest
 
 
-def download_video(url: str, out_dir: Path, log: LogFn = print, progress=None) -> Path:
+def download_video(url: str, out_dir: Path, log: LogFn = print, progress=None, cookies_file: str = "",
+                   cookies_browser: str = "", proxy: str = "", info_out: Optional[dict] = None) -> Path:
     """Unduh video YouTube (maks 1080p, mp4) memakai yt-dlp."""
     _use_ytdlp_override()
     import yt_dlp
@@ -120,9 +121,18 @@ def download_video(url: str, out_dir: Path, log: LogFn = print, progress=None) -
         "ffmpeg_location": str(Path(paths.ffmpeg()).parent),
         "windowsfilenames": True,
     }
+    if cookies_file and Path(cookies_file).exists():
+        opts["cookiefile"] = cookies_file
+    elif cookies_browser:
+        opts["cookiesfrombrowser"] = (cookies_browser.lower(),)
+    if proxy:
+        opts["proxy"] = proxy
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=True)
         fn = Path(ydl.prepare_filename(info)).with_suffix(".mp4")
+        if info_out is not None:
+            info_out.update({"heatmap": info.get("heatmap"), "title": info.get("title", ""),
+                             "channel": info.get("channel") or info.get("uploader") or ""})
     if not fn.exists():
         cands = sorted(out_dir.glob(f"*{info.get('id', '')}*.mp4"))
         if not cands:

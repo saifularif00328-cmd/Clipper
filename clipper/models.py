@@ -103,6 +103,13 @@ class Style:
     fx_fade: bool = True
     fx_grade: bool = True
     fx_vignette: bool = False
+    # audio tambahan
+    bgm_path: str = ""
+    bgm_volume: float = 12.0        # % (musik latar)
+    sfx_path: str = ""
+    sfx_volume: float = 100.0       # % (efek suara hook, diputar di detik 0)
+    voice_volume: float = 100.0     # % suara asli video
+    encoder: str = "auto"           # auto | cpu | nvenc | qsv | amf | videotoolbox
     # audio / pemotongan
     cut_silence: bool = True
     silence_gap: float = 0.45

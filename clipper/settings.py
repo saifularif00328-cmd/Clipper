@@ -22,6 +22,9 @@ class Settings:
     clip_prompt: str = ""             # instruksi kustom untuk pencarian klip
     use_gemini_polish: bool = True
     make_thumbnail: bool = True
+    cookies_file: str = ""            # file cookies Netscape untuk YouTube
+    cookies_browser: str = ""         # chrome | edge | firefox | brave ... (ambil cookies dari browser)
+    proxy: str = ""
     last_source: str = ""
     style: Style = field(default_factory=Style)
 

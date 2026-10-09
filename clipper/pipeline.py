@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, List, Optional
 
-from . import ai, library, media, paths
+from . import ai, heatmap, library, media, paths
 from .models import Clip, Word
 from .settings import Settings
 from .textproc import fmt_time
@@ -71,11 +71,15 @@ class Pipeline:
     def analyze(self, source: str, use_cache: bool = True) -> Project:
         cfg = self.cfg
         src = source.strip().strip('"')
+        yt_info = {}
         if media.is_url(src):
             self.progress(0.0, "Mengunduh video...")
             dl_dir = (Path(cfg.output_dir) if cfg.output_dir else paths.data_dir()) / "downloads"
+            yt_info: dict = {}
             video = media.download_video(src, dl_dir, self.log,
-                                         lambda p: self.progress(0.1 * p, "Mengunduh video..."))
+                                         lambda p: self.progress(0.1 * p, "Mengunduh video..."),
+                                         cookies_file=cfg.cookies_file, cookies_browser=cfg.cookies_browser,
+                                         proxy=cfg.proxy, info_out=yt_info)
         else:
             video = Path(src)
             if not video.exists():
@@ -92,6 +96,7 @@ class Pipeline:
         params = {"count": cfg.clip_count, "min": cfg.min_sec, "max": cfg.max_sec,
                   "model": cfg.gemini_model, "whisper": cfg.whisper_model, "prompt": cfg.clip_prompt.strip()}
         proj = Project(video, pdir, lang, words)
+        heat = self._heat(pdir, yt_info)
         if use_cache and proj.list_file.exists():
             try:
                 d = json.loads(proj.list_file.read_text(encoding="utf-8"))
@@ -108,10 +113,10 @@ class Pipeline:
             self.log(f"Gemini ({cfg.gemini_model}) menganalisis transkrip...")
             g = ai.Gemini(cfg.api(), cfg.gemini_model)
             clips = ai.select_clips_ai(g, words, cfg.clip_count, cfg.min_sec, cfg.max_sec, lang, self.log,
-                                       cfg.clip_prompt)
+                                       cfg.clip_prompt, heat, yt_info.get("channel", ""))
         else:
             self.log("API key Gemini kosong - memakai pemilihan lokal sederhana.")
-            clips = ai.select_clips_local(words, cfg.clip_count, cfg.min_sec, cfg.max_sec)
+            clips = ai.select_clips_local(words, cfg.clip_count, cfg.min_sec, cfg.max_sec, heat)
         clips = ai.enforce_complete(clips, words, cfg.max_sec)
         clips.sort(key=lambda c: c.start)
         for n, c in enumerate(clips, 1):
@@ -122,6 +127,34 @@ class Pipeline:
         self.log(f"{len(clips)} klip ditemukan.")
         self.progress(1.0, "Selesai")
         return proj
+
+    def _heat(self, pdir: Path, yt_info: dict):
+        """Heatmap minat: YouTube 'paling banyak diputar ulang' bila ada, jika tidak energi audio. Di-cache."""
+        f = pdir / "heat.json"
+        if f.exists():
+            try:
+                return json.loads(f.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+        heat = heatmap.from_youtube(yt_info.get("heatmap"))
+        src = "YouTube"
+        if not heat:
+            heat, src = heatmap.from_audio(pdir / "audio16k.wav"), "energi audio"
+        if heat:
+            f.write_text(json.dumps(heat), encoding="utf-8")
+            self.log(f"Heatmap minat penonton dipakai ({src}).")
+        return heat
+
+    @staticmethod
+    def zip_results(proj: Project) -> Path:
+        """Kemas semua hasil (mp4, thumbnail, caption) ke satu file ZIP."""
+        import zipfile
+        out = proj.dir / "clips.zip"
+        with zipfile.ZipFile(out, "w", zipfile.ZIP_STORED) as z:
+            for f in sorted((proj.dir / "clips").glob("*")):
+                if f.suffix.lower() in (".mp4", ".jpg", ".txt"):
+                    z.write(f, f.name)
+        return out
 
     @staticmethod
     def load_cache(list_file: Path) -> Project:

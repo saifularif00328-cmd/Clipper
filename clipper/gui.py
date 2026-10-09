@@ -13,7 +13,7 @@ from tkinter import colorchooser, filedialog, messagebox
 
 import customtkinter as ctk
 
-from . import __version__, library, settings as settings_mod
+from . import __version__, encoders, library, settings as settings_mod
 from .models import Style
 from .pipeline import Cancelled, Pipeline, Project
 from .presets import PRESETS
@@ -29,9 +29,10 @@ UI = "Segoe UI" if os.name == "nt" else "Helvetica"
 
 ANIMS = {"Pop Zoom": "pop", "Karaoke Box": "karaoke", "Glow": "glow", "Penekanan": "emphasis",
          "Kata Kunci": "keyword", "Polos": "plain"}
-LAYOUTS = {"Face Tracking": "face", "Crop Tengah": "center", "Fit + Blur": "blur"}
+LAYOUTS = {"Face Tracking": "face", "Split Cam": "split", "Crop Tengah": "center", "Fit + Blur": "blur"}
 HOOKS = {"Kuning": "yellow", "Merah": "red", "Outline": "outline"}
-RES = {"1080 x 1920  Full HD": (1080, 1920), "720 x 1280  Cepat": (720, 1280)}
+RES = {"9:16  1080 x 1920": (1080, 1920), "9:16  720 x 1280 (cepat)": (720, 1280),
+       "1:1  1080 x 1080": (1080, 1080), "16:9  1920 x 1080": (1920, 1080)}
 LANGS = {"Tanpa terjemahan": "", "Indonesia": "id", "English": "en", "Espa\u00f1ol": "es", "Portugu\u00eas": "pt",
          "Fran\u00e7ais": "fr", "Deutsch": "de", "\u65e5\u672c\u8a9e": "ja", "\ud55c\uad6d\uc5b4": "ko", "\u4e2d\u6587": "zh",
          "\u0627\u0644\u0639\u0631\u0628\u064a\u0629": "ar", "\u0939\u093f\u0928\u094d\u0926\u0940": "hi", "\u0420\u0443\u0441\u0441\u043a\u0438\u0439": "ru",
@@ -795,13 +796,60 @@ class App(ctk.CTk):
         self.v_gap = tk.DoubleVar(value=s.silence_gap)
         self.slider(body, "Jeda dianggap panjang (detik)", self.v_gap, 0.25, 1.2, 1, 0, None, "{:.2f}")
 
+        body = self.card(pg, "Audio tambahan & performa", "Musik latar, efek suara hook, volume suara asli, dan encoder GPU.", 2)
+        V = self._var
+        self.field(body, "Musik latar (opsional)", self._file_row(body, V("bgm_path"), "(tanpa musik)", [("Audio", "*.mp3 *.wav *.m4a *.aac *.ogg")]), 0, 0)
+        self.field(body, "Efek suara hook (opsional)", self._file_row(body, V("sfx_path"), "(tanpa SFX)", [("Audio", "*.mp3 *.wav *.m4a *.aac *.ogg")]), 0, 1)
+        self.slider(body, "Volume musik latar (%)", V("bgm_volume", tk.DoubleVar), 0, 60, 1, 0, None, "{:.0f}")
+        self.slider(body, "Volume SFX (%)", V("sfx_volume", tk.DoubleVar), 0, 200, 1, 1, None, "{:.0f}")
+        self.slider(body, "Volume suara asli (%)", V("voice_volume", tk.DoubleVar), 50, 200, 2, 0, None, "{:.0f}")
+        self.v_enc = tk.StringVar(value=s.encoder)
+        self.field(body, "Encoder video  (auto = GPU bila ada)", self.menu(body, self.v_enc, encoders.CHOICES), 2, 1)
+        self.enc_info = ctk.CTkLabel(body, text="Klik untuk mendeteksi GPU...", font=font(11), text_color=MUTED, anchor="w")
+        self.enc_info.grid(row=6, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        self.btn(body, "Deteksi GPU", self._detect_gpu, width=120, height=32).grid(row=7, column=0, sticky="w", pady=(6, 0))
+
         act = ctk.CTkFrame(pg, fg_color="transparent")
-        act.grid(row=2, column=0, sticky="w", pady=(4, 20))
+        act.grid(row=3, column=0, sticky="w", pady=(4, 20))
         self.btn_render = self.btn(act, "\u25b6  Ekspor Klip Terpilih", self._render, "primary", width=250, height=50)
         self.btn_render.pack(side="left", padx=(0, 12))
         self.btn_stop = self.btn(act, "Batalkan", self._stop, "danger", width=110, height=50)
         self.btn_stop.pack(side="left", padx=(0, 12))
-        self.btn(act, "Buka folder hasil", self._open_out, width=170, height=50).pack(side="left")
+        self.btn(act, "Buka folder hasil", self._open_out, width=170, height=50).pack(side="left", padx=(0, 12))
+        self.btn(act, "Kemas ZIP", self._make_zip, width=120, height=50).pack(side="left")
+
+    def _file_row(self, parent, var, ph, types):
+        f = ctk.CTkFrame(parent, fg_color="transparent")
+        f.grid_columnconfigure(0, weight=1)
+        self.entry(f, var, ph).grid(row=0, column=0, sticky="ew")
+        self.btn(f, "Pilih", lambda: self._pick_file(var, types), width=70).grid(row=0, column=1, padx=(8, 0))
+        return f
+
+    def _pick_file(self, var, types):
+        p = filedialog.askopenfilename(filetypes=types + [("Semua", "*.*")])
+        if p:
+            var.set(p)
+
+    def _detect_gpu(self):
+        self.enc_info.configure(text="Mendeteksi...")
+        self.update_idletasks()
+
+        def job():
+            try:
+                av = encoders.available()
+                ok = [k.upper() for k, v in av.items() if v]
+                self.q.put(("gpu", ("Terdeteksi: " + ", ".join(ok)) if ok else "Tidak ada GPU encoder yang bekerja; memakai CPU (libx264)."))
+            except Exception as e:
+                self.q.put(("gpu", f"Gagal mendeteksi: {e}"))
+        threading.Thread(target=job, daemon=True).start()
+
+    def _make_zip(self):
+        if not self.proj or not (self.proj.dir / "clips").exists():
+            messagebox.showinfo("Clipper", "Belum ada hasil ekspor untuk dikemas.")
+            return
+        z = Pipeline.zip_results(self.proj)
+        self._log(f"ZIP dibuat: {z}")
+        open_path(z.parent)
 
     # ================================================================ pengaturan
     def _page_settings(self, pg):
@@ -813,14 +861,21 @@ class App(ctk.CTk):
         self.field(body, "Model Gemini", self.combo(body, self.v_gmodel, ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"]), 1, 0)
         self.v_wh = tk.StringVar(value=c.whisper_model)
         self.field(body, "Model transkripsi (lokal)", self.combo(body, self.v_wh, ["tiny", "base", "small", "medium", "large-v3"]), 1, 1)
-        body = self.card(pg, "Penyimpanan", "Hasil disimpan per proyek: klip, thumbnail, transkrip, dan list_clip.json.", 1)
+        body = self.card(pg, "Akses YouTube", "Jika YouTube menolak unduhan (bot check / video dibatasi usia), gunakan cookies atau proxy.", 1)
+        self.v_ck = tk.StringVar(value=c.cookies_file)
+        self.v_ckb = tk.StringVar(value=c.cookies_browser or "(tidak)")
+        self.v_proxy = tk.StringVar(value=c.proxy)
+        self.field(body, "File cookies (format Netscape)", self._file_row(body, self.v_ck, "(opsional)", [("Cookies", "*.txt")]), 0, 0)
+        self.field(body, "atau ambil cookies dari browser", self.menu(body, self.v_ckb, ["(tidak)", "chrome", "edge", "firefox", "brave", "opera"]), 0, 1)
+        self.field(body, "Proxy", self.entry(body, self.v_proxy, "http://user:pass@host:port (opsional)"), 1, 0, 2)
+        body = self.card(pg, "Penyimpanan", "Hasil disimpan per proyek: klip, thumbnail, transkrip, dan list_clip.json.", 2)
         self.v_out = tk.StringVar(value=c.output_dir)
         out = ctk.CTkFrame(body, fg_color="transparent")
         out.grid_columnconfigure(0, weight=1)
         self.entry(out, self.v_out, "(default: folder 'Clipper_output' di samping video)").grid(row=0, column=0, sticky="ew")
         self.btn(out, "Pilih...", self._pick_out, width=90).grid(row=0, column=1, padx=(10, 14))
         self.field(body, "Folder output", out, 0, 0, 2)
-        body = self.card(pg, "Pemeliharaan", "Jika unduhan YouTube ditolak, perbarui yt-dlp lalu coba lagi.", 2)
+        body = self.card(pg, "Pemeliharaan", "Jika unduhan YouTube ditolak, perbarui yt-dlp lalu coba lagi.", 3)
         self.btn(body, "Perbarui yt-dlp", self._update_ytdlp, width=160).grid(row=0, column=0, sticky="w")
 
     # ================================================================ pengaturan -> objek
@@ -838,6 +893,9 @@ class App(ctk.CTk):
             c.max_sec = c.min_sec + 15
         c.clip_prompt = self.prompt.get("1.0", "end").strip()
         c.output_dir = self.v_out.get().strip()
+        c.cookies_file = self.v_ck.get().strip()
+        c.cookies_browser = "" if self.v_ckb.get().startswith("(") else self.v_ckb.get()
+        c.proxy = self.v_proxy.get().strip()
         c.target_lang = LANGS[self.v_tl.get()]
         c.use_gemini_polish, c.make_thumbnail = self.v_polish.get(), self.v_th.get()
         for name, v in self.sv.items():
@@ -845,6 +903,7 @@ class App(ctk.CTk):
         s.layout, s.sub_anim = LAYOUTS[self.v_layout.get()], ANIMS[self.v_anim.get()]
         s.hook_style = HOOKS[self.v_hookstyle.get()]
         s.out_width, s.out_height = RES[self.v_res.get()]
+        s.encoder = self.v_enc.get()
         s.cut_silence, s.silence_gap = self.v_cut.get(), round(self.v_gap.get(), 2)
         s.remove_fillers, s.loudnorm = self.v_fill.get(), self.v_ln.get()
         c.style = s
@@ -984,6 +1043,8 @@ class App(ctk.CTk):
                 elif kind == "project":
                     self.proj = data
                     self._after_project()
+                elif kind == "gpu":
+                    self.enc_info.configure(text=data)
                 elif kind == "open":
                     try:
                         open_path(data)

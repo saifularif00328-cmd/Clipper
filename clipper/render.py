@@ -9,7 +9,7 @@ from typing import Callable, List, Optional, Tuple
 import cv2
 import numpy as np
 
-from . import paths
+from . import encoders, paths
 from .face_track import camera_path
 from .media import probe, run
 from .models import Clip, Style, Word
@@ -90,24 +90,32 @@ class Framer:
         self.sw, self.sh, self.W, self.H, self.layout = src_w, src_h, W, H, layout
         self.ar = W / H
 
-    def _crop(self, frame, cx, cy, zoom):
+    def _crop_to(self, frame, cx, cy, zoom, ow, oh):
+        ar = ow / oh
         ch = self.sh / zoom
-        cw = ch * self.ar
+        cw = ch * ar
         if cw > self.sw:
             cw = self.sw / zoom if zoom > 1 else self.sw
-            ch = cw / self.ar
+            ch = cw / ar
         x0 = min(max(cx - cw / 2, 0), self.sw - cw)
         y0 = min(max(cy - ch / 2, 0), self.sh - ch)
-        s = self.W / cw
+        s = ow / cw
         M = np.array([[s, 0, -x0 * s], [0, s, -y0 * s]], dtype=np.float32)
-        return cv2.warpAffine(frame, M, (self.W, self.H), flags=cv2.INTER_CUBIC,
-                              borderMode=cv2.BORDER_REPLICATE)
+        return cv2.warpAffine(frame, M, (ow, oh), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+
+    def _crop(self, frame, cx, cy, zoom):
+        return self._crop_to(frame, cx, cy, zoom, self.W, self.H)
 
     def __call__(self, frame, cx, cy, zoom):
         if self.layout in ("face", "center"):
             return self._crop(frame, cx, cy, zoom)
+        if self.layout == "split":
+            # panel atas: wajah pembicara (close-up), panel bawah: tampilan utama/konten
+            top_h = int(self.H * 0.42) // 2 * 2
+            top = self._crop_to(frame, cx, cy, max(zoom, 1.0) * 1.7, self.W, top_h)
+            bot = self._crop_to(frame, self.sw / 2, self.sh / 2, 1.0, self.W, self.H - top_h)
+            return np.vstack([top, bot])
         # blur: latar buram + video penuh lebar di tengah
-        # latar = crop tengah diisi, diburamkan
         bgsrc = self._crop(frame, self.sw / 2, self.sh / 2, 1.0)
         bg = cv2.resize(bgsrc, (self.W // 8, self.H // 8), interpolation=cv2.INTER_AREA)
         bg = cv2.GaussianBlur(bg, (0, 0), 6)
@@ -115,9 +123,7 @@ class Framer:
         bg = (bg * 0.55).astype(np.uint8)
         s = (self.W / self.sw) * zoom
         fw, fh = self.sw * s, self.sh * s
-        tx = (self.W - fw) / 2
-        ty = (self.H - fh) / 2
-        M = np.array([[s, 0, tx], [0, s, ty]], dtype=np.float32)
+        M = np.array([[s, 0, (self.W - fw) / 2], [0, s, (self.H - fh) / 2]], dtype=np.float32)
         cv2.warpAffine(frame, M, (self.W, self.H), dst=bg, flags=cv2.INTER_CUBIC,
                        borderMode=cv2.BORDER_TRANSPARENT)
         return bg
@@ -132,17 +138,24 @@ def logo_xy(col: int, row: int) -> Tuple[str, str]:
 
 def build_final_cmd(stage1: Path, out: Path, st: Style, W: int, H: int, fps: float, duration: float,
                     has_audio: bool, ass_name: Optional[str], fontsdir: Optional[str],
-                    voice: Optional[Path], hook_sec: float, quick: bool = False) -> list:
+                    voice: Optional[Path], hook_sec: float, quick: bool = False,
+                    encoder: str = "cpu") -> list:
     cmd = [paths.ffmpeg(), "-y", "-f", "rawvideo", "-pix_fmt", "bgr24", "-s", f"{W}x{H}",
            "-r", f"{fps:.4f}", "-i", "-", "-i", str(stage1)]
     idx = 2
-    logo_idx = voice_idx = None
+    logo_idx = voice_idx = sfx_idx = bgm_idx = None
     if st.logo_path and Path(st.logo_path).exists():
         cmd += ["-loop", "1", "-i", st.logo_path]
         logo_idx, idx = idx, idx + 1
     if voice:
         cmd += ["-i", str(voice)]
         voice_idx, idx = idx, idx + 1
+    if st.sfx_path and Path(st.sfx_path).exists() and not quick:
+        cmd += ["-i", st.sfx_path]
+        sfx_idx, idx = idx, idx + 1
+    if st.bgm_path and Path(st.bgm_path).exists() and not quick:
+        cmd += ["-stream_loop", "-1", "-i", st.bgm_path]
+        bgm_idx, idx = idx, idx + 1
 
     vf = []
     if st.fx_grade:
@@ -163,13 +176,34 @@ def build_final_cmd(stage1: Path, out: Path, st: Style, W: int, H: int, fps: flo
                      f"colorchannelmixer=aa={st.logo_opacity:.2f}[lg]")
         graph.append(f"[v0][lg]overlay=x={x}:y={y}:shortest=1[v1]")
         last = "v1"
+
+    # ---- audio: suara asli (+ducking saat voice-over hook) + voice-over + SFX + musik latar
+    vv = max(st.voice_volume, 0) / 100.0
+    extras = voice_idx is not None or sfx_idx is not None or bgm_idx is not None
     amap = None
-    if has_audio:
-        a = "[1:a]"
+    if has_audio or extras:
+        if has_audio:
+            if voice_idx is not None:
+                graph.append(f"[1:a]volume='if(lt(t,{hook_sec:.2f}),0.35,1)*{vv:.3f}':eval=frame[a0]")
+            else:
+                graph.append(f"[1:a]volume={vv:.3f}[a0]")
+        else:
+            graph.append(f"anullsrc=r=48000:cl=stereo,atrim=0:{duration:.3f}[a0]")
+        mix = ["[a0]"]
         if voice_idx is not None:
-            graph.append(f"{a}volume='if(lt(t,{hook_sec:.2f}),0.35,1)':eval=frame[bg]")
             graph.append(f"[{voice_idx}:a]adelay=120|120,volume=1.4[vo]")
-            graph.append("[bg][vo]amix=inputs=2:duration=first:normalize=0[am]")
+            mix.append("[vo]")
+        if sfx_idx is not None:
+            graph.append(f"[{sfx_idx}:a]adelay=1|1,volume={max(st.sfx_volume, 0) / 100:.3f}[sx]")
+            mix.append("[sx]")
+        if bgm_idx is not None:
+            fo = max(duration - 1.0, 0)
+            graph.append(f"[{bgm_idx}:a]atrim=0:{duration:.3f},asetpts=PTS-STARTPTS,"
+                         f"volume={max(st.bgm_volume, 0) / 100:.3f},afade=t=in:d=0.5,afade=t=out:st={fo:.3f}:d=1[bg]")
+            mix.append("[bg]")
+        a = "[a0]"
+        if len(mix) > 1:
+            graph.append(f"{''.join(mix)}amix=inputs={len(mix)}:duration=first:normalize=0:dropout_transition=0[am]")
             a = "[am]"
         post = []
         if st.loudnorm:
@@ -179,13 +213,11 @@ def build_final_cmd(stage1: Path, out: Path, st: Style, W: int, H: int, fps: flo
             post.append(f"afade=t=out:st={max(duration - 0.3, 0):.3f}:d=0.3")
         graph.append(f"{a}{','.join(post) if post else 'anull'}[aout]")
         amap = "[aout]"
-    graph_text = ";".join(graph)
-    cmd += ["-filter_complex", graph_text, "-map", f"[{last}]"]
+    cmd += ["-filter_complex", ";".join(graph), "-map", f"[{last}]"]
     if amap:
         cmd += ["-map", amap, "-c:a", "aac", "-b:a", "192k"]
-    cmd += ["-c:v", "libx264", "-preset", "ultrafast" if quick else "medium", "-crf", "30" if quick else "18",
-            "-pix_fmt", "yuv420p",
-            "-movflags", "+faststart", "-t", f"{duration:.3f}", str(out)]
+    cmd += encoders.video_args(encoder, quick)
+    cmd += ["-pix_fmt", "yuv420p", "-movflags", "+faststart", "-t", f"{duration:.3f}", str(out)]
     return cmd
 
 
@@ -231,7 +263,7 @@ def finish_render(src: Path, clip: Clip, prep: dict, rwords: List[Word], st: Sty
     cx = np.full(n_est, sw / 2)
     cy = np.full(n_est, sh / 2)
     track_info = {}
-    if st.layout == "face":
+    if st.layout in ("face", "split"):
         log("  Melacak wajah pembicara...")
         crop_w = min(sw, sh * W / H)
         cx, cy, track_info = camera_path(str(stage1), crop_w,
@@ -257,34 +289,43 @@ def finish_render(src: Path, clip: Clip, prep: dict, rwords: List[Word], st: Sty
                     pass
             fontsdir_rel = "fonts"
 
-    cmd = build_final_cmd(stage1, out, st, W, H, fps, duration, info["has_audio"], ass_name,
-                          fontsdir_rel, voice_file, hook_seconds, quick)
-    log("  Merender video final...")
-    errlog = work / f"clip{clip.id}_ffmpeg.log"
-    cap = cv2.VideoCapture(str(stage1))
-    n_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or n_est)
-    with open(errlog, "w", encoding="utf-8", errors="replace") as ef:
-        proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=ef, cwd=str(work),
-                                creationflags=paths.no_window_flags())
-        i = 0
-        try:
-            while True:
-                ok, frame = cap.read()
-                if not ok:
-                    break
-                k = min(i, len(cx) - 1)
-                outf = framer(frame, cx[k], cy[k], zoom[min(i, len(zoom) - 1)])
-                proc.stdin.write(outf.tobytes())
-                i += 1
-                if progress and i % 15 == 0:
-                    progress(0.3 + 0.7 * min(i / max(n_frames, 1), 1.0))
-            proc.stdin.close()
-        except (BrokenPipeError, OSError):
-            pass
-        finally:
-            cap.release()
-        rc = proc.wait()
+    enc = "cpu" if quick else encoders.resolve(st.encoder)
+    n_frames_hint = n_est
+
+    def encode(encoder: str) -> int:
+        cmd = build_final_cmd(stage1, out, st, W, H, fps, duration, info["has_audio"], ass_name,
+                              fontsdir_rel, voice_file, hook_seconds, quick, encoder)
+        errlog = work / f"clip{clip.id}_ffmpeg.log"
+        cap = cv2.VideoCapture(str(stage1))
+        n_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or n_frames_hint)
+        with open(errlog, "w", encoding="utf-8", errors="replace") as ef:
+            proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=ef, cwd=str(work),
+                                    creationflags=paths.no_window_flags())
+            i = 0
+            try:
+                while True:
+                    ok, frame = cap.read()
+                    if not ok:
+                        break
+                    k = min(i, len(cx) - 1)
+                    proc.stdin.write(framer(frame, cx[k], cy[k], zoom[min(i, len(zoom) - 1)]).tobytes())
+                    i += 1
+                    if progress and i % 15 == 0:
+                        progress(0.3 + 0.7 * min(i / max(n_frames, 1), 1.0))
+                proc.stdin.close()
+            except (BrokenPipeError, OSError):
+                pass
+            finally:
+                cap.release()
+            return proc.wait()
+
+    log(f"  Merender video final ({enc})...")
+    rc = encode(enc)
+    if rc != 0 and enc != "cpu":
+        log(f"  ! Encoder {enc} gagal, mengulang dengan CPU (libx264)...")
+        rc = encode("cpu")
     if rc != 0:
+        errlog = work / f"clip{clip.id}_ffmpeg.log"
         tail = "\n".join(errlog.read_text(errors="replace").splitlines()[-12:])
         raise RuntimeError(f"ffmpeg gagal merender klip {clip.id}:\n{tail}")
     return {"duration": duration, "track": track_info, "stage1": stage1}
