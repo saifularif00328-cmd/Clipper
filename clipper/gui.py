@@ -14,6 +14,7 @@ import customtkinter as ctk
 
 from . import __version__, settings as settings_mod
 from .pipeline import Cancelled, Pipeline, Project
+from .presets import PRESETS
 from .subtitles import list_fonts
 from .textproc import fmt_time
 
@@ -24,7 +25,7 @@ TEXT, MUTED = "#E9ECF5", "#8B91A8"
 OK, WARN, DANGER = "#2ECC8F", "#F5B942", "#F0506E"
 UI = "Segoe UI" if os.name == "nt" else "Helvetica"
 
-ANIMS = {"Pop Zoom": "pop", "Karaoke Box": "karaoke", "Glow": "glow", "Kata Kunci": "keyword", "Polos": "plain"}
+ANIMS = {"Pop Zoom": "pop", "Karaoke Box": "karaoke", "Glow": "glow", "Penekanan": "emphasis", "Kata Kunci": "keyword", "Polos": "plain"}
 LAYOUTS = {"Face Tracking": "face", "Crop Tengah": "center", "Fit + Blur": "blur"}
 HOOKS = {"Kuning": "yellow", "Merah": "red", "Outline": "outline"}
 RES = {"1080 x 1920  Full HD": (1080, 1920), "720 x 1280  Cepat": (720, 1280)}
@@ -349,7 +350,12 @@ class App(ctk.CTk):
         left.grid_columnconfigure(0, weight=1)
         s, V = self.st, self._var
 
-        body = self.card(left, "Layout & subtitle", "", 0)
+        body = self.card(left, "Preset gaya", "Satu klik untuk menerapkan paket pengaturan (bisa diubah lagi).", 0)
+        self.v_preset = tk.StringVar(value="Pilih preset...")
+        self.field(body, "Preset", self.menu(body, self.v_preset, list(PRESETS)), 0, 0, 2)
+        self.v_preset.trace_add("write", lambda *_: self._apply_preset())
+        left_cards = left
+        body = self.card(left, "Layout & subtitle", "", 1)
         self.v_layout = tk.StringVar(value=inv(LAYOUTS, s.layout))
         self.field(body, "Layout 9:16", self.seg(body, self.v_layout, list(LAYOUTS)), 0, 0, 2)
         self.v_anim = tk.StringVar(value=inv(ANIMS, s.sub_anim))
@@ -360,12 +366,13 @@ class App(ctk.CTk):
         self.slider(body, "Kata per baris", V("sub_max_words", tk.IntVar), 1, 8, 3, 1, 7)
         self.slider(body, "Stroke dalam", V("sub_inner_w", tk.IntVar), 0, 14, 4, 0, 14)
         self.slider(body, "Stroke luar", V("sub_outer_w", tk.IntVar), 0, 20, 4, 1, 20)
+        self.slider(body, "Geser vertikal", V("sub_dy", tk.DoubleVar), -0.25, 0.25, 5, 0, None, "{:+.2f}")
         sw = ctk.CTkFrame(body, fg_color="transparent")
-        sw.grid(row=10, column=0, columnspan=2, sticky="w", pady=(10, 0))
+        sw.grid(row=11, column=0, columnspan=2, sticky="w", pady=(10, 0))
         self.switch(sw, "Subtitle aktif", V("sub_enabled", tk.BooleanVar)).pack(side="left", padx=(0, 26))
         self.switch(sw, "HURUF KAPITAL", V("sub_uppercase", tk.BooleanVar)).pack(side="left")
         cf = ctk.CTkFrame(body, fg_color="transparent")
-        cf.grid(row=11, column=0, columnspan=2, sticky="w", pady=(16, 0))
+        cf.grid(row=12, column=0, columnspan=2, sticky="w", pady=(16, 0))
         for i, (label, name) in enumerate(COLOR_FIELDS):
             cell = ctk.CTkFrame(cf, fg_color="transparent")
             cell.grid(row=0, column=i, padx=(0, 14))
@@ -376,7 +383,7 @@ class App(ctk.CTk):
             ctk.CTkLabel(cell, text=label, font=font(10), text_color=MUTED).pack(pady=(4, 0))
             self.color_btns[name] = b
 
-        body = self.card(left, "Hook / headline awal", "Teks stop-scroll di beberapa detik pertama.", 1)
+        body = self.card(left, "Hook / headline awal", "Teks stop-scroll di beberapa detik pertama.", 2)
         sw = ctk.CTkFrame(body, fg_color="transparent")
         sw.grid(row=0, column=0, columnspan=2, sticky="w")
         self.switch(sw, "Tampilkan hook", V("hook_enabled", tk.BooleanVar)).pack(side="left", padx=(0, 26))
@@ -386,7 +393,7 @@ class App(ctk.CTk):
         self.slider(body, "Ukuran hook", V("hook_size", tk.IntVar), 40, 140, 2, 0, 100)
         self.slider(body, "Durasi (detik)", V("hook_seconds", tk.DoubleVar), 1.5, 6, 2, 1, 9, "{:.1f}")
 
-        body = self.card(left, "Logo & efek", "", 2)
+        body = self.card(left, "Logo & efek", "", 3)
         lf = ctk.CTkFrame(body, fg_color="transparent")
         lf.grid_columnconfigure(0, weight=1)
         self.entry(lf, V("logo_path"), "(tanpa logo)").grid(row=0, column=0, sticky="ew")
@@ -396,7 +403,7 @@ class App(ctk.CTk):
         self.slider(body, "Opasitas logo", V("logo_opacity", tk.DoubleVar), 0.2, 1.0, 1, 1, None, "{:.2f}")
         fx = ctk.CTkFrame(body, fg_color="transparent")
         fx.grid(row=6, column=0, columnspan=2, sticky="w", pady=(14, 0))
-        for i, (label, name) in enumerate((("Zoom punch-in", "fx_punch"), ("Slow zoom", "fx_slowzoom"),
+        for i, (label, name) in enumerate((("Zoom punch-in", "fx_punch"), ("Potong shot (close-up)", "fx_shots"), ("Slow zoom", "fx_slowzoom"),
                                            ("Progress bar", "fx_progress"), ("Fade in/out", "fx_fade"),
                                            ("Color grade", "fx_grade"), ("Vignette", "fx_vignette"))):
             self.switch(fx, label, V(name, tk.BooleanVar)).grid(row=i // 3, column=i % 3, sticky="w", padx=(0, 28), pady=6)
@@ -423,6 +430,28 @@ class App(ctk.CTk):
         for v in (self.v_anim, self.v_hookstyle):
             v.trace_add("write", lambda *_: self._draw_preview())
         self.after(250, self._draw_preview)
+
+    def _apply_preset(self):
+        name = self.v_preset.get()
+        data = PRESETS.get(name)
+        if data is None:
+            return
+        from .models import Style
+        base = Style().to_dict() if name == "CapCut Klasik" else self.st.to_dict()
+        if name == "CapCut Klasik":
+            base.update({k: v for k, v in self.st.to_dict().items() if k.startswith(("logo", "out_", "fps"))})
+        base.update(data)
+        new = Style.from_dict(base)
+        for k, v in new.to_dict().items():
+            setattr(self.st, k, v)
+        for k, v in self.sv.items():
+            v.set(getattr(self.st, k))
+        self.v_layout.set(inv(LAYOUTS, self.st.layout))
+        self.v_anim.set(inv(ANIMS, self.st.sub_anim))
+        self.v_hookstyle.set(inv(HOOKS, self.st.hook_style))
+        for k, b in self.color_btns.items():
+            b.configure(fg_color=getattr(self.st, k), hover_color=getattr(self.st, k))
+        self._draw_preview()
 
     def _pick_color(self, name):
         c = colorchooser.askcolor(color=getattr(self.st, name), title="Pilih warna")[1]
@@ -513,13 +542,13 @@ class App(ctk.CTk):
             else:
                 self._stroke_text(hx, hy, "HOOK STOP\nSCROLL", hs, "#FFFFFF", "#111111", "#FFE600", 1, 2)
         # subtitle
-        sx, sy = ox + (s.sub_pos[0] + 0.5) / 3 * PW, oy + (s.sub_pos[1] + 0.5) / 5 * PH
+        sx, sy = ox + (s.sub_pos[0] + 0.5) / 3 * PW, oy + ((s.sub_pos[1] + 0.5) / 5 + float(self.sv["sub_dy"].get())) * PH
         fs = int(self.sv["sub_size"].get() * sc * 0.6)
-        txt = "KATA AKTIF" if self.sv["sub_uppercase"].get() else "Kata aktif"
+        txt = "KATA AKTIF" if self.sv["sub_uppercase"].get() else "kata aktif"
         anim = ANIMS[self.v_anim.get()]
         if anim == "karaoke":
             c.create_rectangle(sx - PW * 0.2, sy - fs * 0.9, sx + PW * 0.2, sy + fs * 0.9, fill=s.sub_box, outline="")
-        self._stroke_text(sx, sy, txt, fs, s.sub_active if anim in ("pop", "glow") else s.sub_fill,
+        self._stroke_text(sx, sy, txt, fs, s.sub_active if anim in ("pop", "glow", "emphasis") else s.sub_fill,
                           s.sub_inner, s.sub_outer, max(1, s.sub_inner_w // 3), max(1, s.sub_outer_w // 3))
         # logo
         lx, ly = ox + (s.logo_pos[0] + 0.5) / 3 * PW, oy + (s.logo_pos[1] + 0.5) / 3 * PH

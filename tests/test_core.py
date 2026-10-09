@@ -191,3 +191,24 @@ def test_ytdlp_override_is_used(tmp_path, monkeypatch):
     (pkg / "version.py").write_text("__version__ = '2099.01.01'\n")
     monkeypatch.setattr(sys, "path", list(sys.path))
     assert media.ytdlp_version() == "2099.01.01"
+
+
+def test_emphasis_mode_and_presets():
+    from clipper.presets import PRESETS
+    ws = mk("ini soal keluarga besar yang saling menjaga", 0.0)
+    st = Style.from_dict({**Style().to_dict(), **PRESETS["Podcast Viral"]})
+    assert subtitles.emphasis_index(["ini", "soal", "keluarga", "yang"]) == 2
+    assert subtitles.emphasis_index(["dan", "yang", "itu"]) == -1
+    text, _ = subtitles.build_ass(ws, st, 1080, 1920, 5.0, "", 3.0)
+    assert "fscx125" in text and "Style: Outer" in text
+    assert "Dialogue: 1" not in text  # stroke luar 0 -> layer Outer dilewati
+    assert subtitles.find_font("Lilita One")[1] == "Lilita One"
+
+
+def test_shots_zoom_alternates():
+    import numpy as np
+    from clipper.render import zoom_series
+    ws = mk("kalimat satu. kalimat dua. kalimat tiga. kalimat empat.", 0.0, dur=0.5, gap=0.1)
+    st = Style(fx_shots=True, fx_slowzoom=False)
+    z = zoom_series(int(ws[-1].end * 30) + 5, 30, ws, st)
+    assert z.min() >= 1.0 and z.max() > 1.4 and (np.abs(np.diff(z)) < 0.2).all()

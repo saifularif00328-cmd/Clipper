@@ -53,7 +53,7 @@ class Style:
     sub_enabled: bool = True
     sub_font: str = "Poppins ExtraBold"
     sub_size: int = 84
-    sub_anim: str = "pop"           # pop | karaoke | glow | keyword | plain
+    sub_anim: str = "pop"           # pop | karaoke | glow | keyword | emphasis | plain
     sub_fill: str = "#FFFFFF"
     sub_active: str = "#FFE600"
     sub_inner: str = "#000000"
@@ -65,6 +65,7 @@ class Style:
     sub_uppercase: bool = True
     sub_max_words: int = 4
     sub_pos: list = field(default_factory=lambda: [1, 3])   # [kolom 0-2, baris 0-4]
+    sub_dy: float = 0.0             # geser vertikal (fraksi tinggi layar)
     keywords: str = ""              # dipisah koma
     keyword_color: str = "#39FF14"
     # hook
@@ -82,6 +83,7 @@ class Style:
     logo_opacity: float = 0.9
     # efek
     fx_punch: bool = True
+    fx_shots: bool = False          # potongan shot: bergantian close-up & shot lebar
     fx_slowzoom: bool = True
     fx_progress: bool = True
     fx_fade: bool = True

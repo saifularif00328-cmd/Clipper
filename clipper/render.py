@@ -54,7 +54,21 @@ def zoom_series(n: int, fps: float, words: List[Word], st: Style) -> np.ndarray:
     t = np.arange(n) / fps
     if st.fx_slowzoom:
         z += 0.06 * (t / max(t[-1], 1e-3))
-    if st.fx_punch and words:
+    if st.fx_shots and words:
+        # potongan shot ala podcast: bergantian shot lebar <-> close-up (transisi cepat 0.18 dtk)
+        sents = split_sentences(words, pause=0.5)
+        level, last, tgt = 0, -9.0, np.zeros(n)
+        switches = []
+        for a, _ in sents:
+            if words[a].start - last >= 3.2:
+                switches.append(words[a].start)
+                last = words[a].start
+        for T in switches:
+            level = 1 - level
+            tgt = np.where(t >= T, float(level), tgt)
+        sm = np.clip(np.convolve(tgt, np.ones(max(int(fps * 0.18), 1)) / max(int(fps * 0.18), 1), mode="same"), 0, 1)
+        z += 0.5 * sm
+    if st.fx_punch and words and not st.fx_shots:
         triggers, last = [], -9.0
         sents = split_sentences(words, pause=0.5)
         for a, _ in sents:

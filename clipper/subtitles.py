@@ -42,7 +42,7 @@ def list_fonts() -> List[str]:
     """Nama font yang bisa dipilih di GUI (bundel + alias Windows yang ada)."""
     names = []
     for f in sorted(paths.asset("fonts").glob("*.ttf")):
-        names.append(f.stem.replace("-", " "))
+        names.append(_resolve(f, f.stem)[1])
     if os.name == "nt":
         wf = Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts"
         for n, fn in WIN_ALIASES.items():
@@ -60,7 +60,12 @@ def find_font(name: str) -> Tuple[Optional[str], str]:
         if fn_alias and (d / fn_alias).exists():
             return _resolve(d / fn_alias, name)
         for f in d.rglob("*"):
-            if f.suffix.lower() in (".ttf", ".otf") and _slug(f.stem) == want:
+            if f.suffix.lower() not in (".ttf", ".otf"):
+                continue
+            stem = _slug(f.stem)
+            if want in (stem, stem.replace("regular", "")):
+                return _resolve(f, name)
+            if d == paths.asset("fonts") and _slug(_resolve(f, f.stem)[1]) == want:
                 return _resolve(f, name)
     fallback = paths.asset("fonts", "Poppins-ExtraBold.ttf")
     if fallback.exists():
@@ -130,6 +135,21 @@ def grid_xy(col: int, row: int, cols: int, rows: int, W: int, H: int) -> Tuple[f
     return (col + 0.5) / cols * W, (row + 0.5) / rows * H
 
 
+STOP = {"yang", "dan", "di", "ke", "dari", "ini", "itu", "untuk", "dengan", "pada", "juga", "atau", "karena",
+        "tapi", "kalau", "jadi", "aja", "saja", "udah", "sudah", "nggak", "gak", "ada", "akan", "bisa", "the",
+        "and", "that", "this", "with", "have", "for", "you", "are", "was", "but", "not"}
+
+
+def emphasis_index(texts: List[str]) -> int:
+    """Kata yang ditekankan di satu baris: kata terpanjang yang bukan kata sambung."""
+    best, best_len = -1, 3
+    for i, t in enumerate(texts):
+        n = norm(t)
+        if n and n not in STOP and len(n) > best_len:
+            best, best_len = i, len(n)
+    return best
+
+
 def chunk_words(words: List[Word], max_words: int, max_gap: float = 0.55) -> List[List[Word]]:
     lines, cur = [], []
     for i, w in enumerate(words):
@@ -187,6 +207,8 @@ def subtitle_events(words: List[Word], st: Style, W: int, H: int, m: Measurer) -
     kws = {norm(k) for k in st.keywords.split(",") if k.strip()}
     lines = chunk_words(words, st.sub_max_words)
     cx0, cy0 = grid_xy(st.sub_pos[0], st.sub_pos[1], 3, 5, W, H)
+    cy0 += st.sub_dy * H
+    EMPH = 1.25
     margin = W * 0.06
     max_w = W * 0.88
     out = []
@@ -194,6 +216,7 @@ def subtitle_events(words: List[Word], st: Style, W: int, H: int, m: Measurer) -
     fill, act, kwc = ass_color(st.sub_fill), ass_color(st.sub_active), ass_color(st.keyword_color)
     for li, line in enumerate(lines):
         texts = [_clean(w.text.upper() if st.sub_uppercase else w.text) for w in line]
+        emph = emphasis_index(texts) if anim == "emphasis" else -1
         rows = _wrap(texts, m, max_w)
         row_h = m.size * 1.18
         y_first = cy0 - (len(rows) - 1) * row_h / 2
@@ -203,11 +226,11 @@ def subtitle_events(words: List[Word], st: Style, W: int, H: int, m: Measurer) -
         le = max(le, line[-1].end)
         dur_ms = int((le - ls) * 1000)
         for r, idxs in enumerate(rows):
-            wsum = sum(m.width(texts[i]) for i in idxs) + m.space * (len(idxs) - 1)
+            wsum = sum(m.width(texts[i]) * (EMPH if i == emph else 1) for i in idxs) + m.space * (len(idxs) - 1)
             x = min(max(cx0 - wsum / 2, margin), W - margin - wsum)
             y = y_first + r * row_h
             for i in idxs:
-                wd = m.width(texts[i])
+                wd = m.width(texts[i]) * (EMPH if i == emph else 1)
                 px = x + wd / 2
                 x += wd + m.space
                 w = line[i]
@@ -229,11 +252,15 @@ def subtitle_events(words: List[Word], st: Style, W: int, H: int, m: Measurer) -
                     if anim in ("pop", "glow") or (anim == "keyword" and is_kw):
                         a_col = kwc if is_kw else act
                         color_t = f"\\t({ta},{ta + 1},\\1c{a_col})\\t({tb},{tb + 1},\\1c{base})"
-                body = f"{pos}\\fscx100\\fscy100"
+                sc0 = int(EMPH * 100) if i == emph else 100
+                if i == emph:
+                    base = kwc if is_kw else act
+                body = f"{pos}\\fscx{sc0}\\fscy{sc0}"
                 if animate and anim == "karaoke":
                     pass
                 word = texts[i]
-                out.append(_ev(1, ls, le, "Outer", f"{{{body}{scale_t}}}{word}"))
+                if st.sub_outer_w > 0:
+                    out.append(_ev(1, ls, le, "Outer", f"{{{body}{scale_t}}}{word}"))
                 out.append(_ev(2, ls, le, "Main", f"{{{body}\\1c{base}{scale_t}{color_t}}}{word}"))
                 a_abs, b_abs = ls + ta / 1000, ls + tb / 1000
                 if anim == "karaoke":
