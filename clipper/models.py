@@ -81,6 +81,16 @@ class Style:
     logo_pos: list = field(default_factory=lambda: [2, 0])  # [kolom 0-2, baris 0-2]
     logo_scale: float = 0.16
     logo_opacity: float = 0.9
+    # branding teks
+    badge_enabled: bool = False
+    badge_text: str = "WATCH FULL VIDEO"
+    badge_sub: str = ""             # nama channel
+    badge_pos: list = field(default_factory=lambda: [0, 0])   # grid 3x5
+    wm_enabled: bool = False
+    wm_text: str = ""
+    wm_pos: list = field(default_factory=lambda: [1, 2])
+    wm_size: int = 60
+    wm_opacity: float = 0.35
     # efek
     fx_punch: bool = True
     fx_shots: bool = False          # potongan shot: bergantian close-up & shot lebar

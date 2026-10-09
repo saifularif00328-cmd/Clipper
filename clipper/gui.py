@@ -39,6 +39,7 @@ COLOR_FIELDS = [("Isi", "sub_fill"), ("Aktif", "sub_active"), ("Stroke dalam", "
                 ("Kata kunci", "keyword_color")]
 PAGES = [("source", "Sumber", "Video & pengaturan AI"), ("clips", "Klip", "Tinjau hasil analisis"),
          ("style", "Tampilan", "Subtitle, hook, logo, efek"), ("render", "Render", "Ekspor video & thumbnail")]
+POSATTR = {"sub": "sub_pos", "hook": "hook_pos", "logo": "logo_pos", "badge": "badge_pos", "mark": "wm_pos"}
 PW, PH = 252, 448   # ukuran kanvas pratinjau
 
 
@@ -393,7 +394,18 @@ class App(ctk.CTk):
         self.slider(body, "Ukuran hook", V("hook_size", tk.IntVar), 40, 140, 2, 0, 100)
         self.slider(body, "Durasi (detik)", V("hook_seconds", tk.DoubleVar), 1.5, 6, 2, 1, 9, "{:.1f}")
 
-        body = self.card(left, "Logo & efek", "", 3)
+        body = self.card(left, "Branding teks", "Badge ajakan tonton video penuh & watermark nama channel.", 3)
+        sw = ctk.CTkFrame(body, fg_color="transparent")
+        sw.grid(row=0, column=0, columnspan=2, sticky="w")
+        self.switch(sw, "Badge 'WATCH FULL VIDEO'", V("badge_enabled", tk.BooleanVar)).pack(side="left", padx=(0, 26))
+        self.switch(sw, "Watermark teks", V("wm_enabled", tk.BooleanVar)).pack(side="left")
+        self.field(body, "Teks badge", self.entry(body, V("badge_text"), "WATCH FULL VIDEO"), 1, 0)
+        self.field(body, "Nama channel (di badge)", self.entry(body, V("badge_sub"), "Nama Channel"), 1, 1)
+        self.field(body, "Teks watermark", self.entry(body, V("wm_text"), "NAMA CHANNEL+"), 2, 0)
+        self.slider(body, "Opasitas watermark", V("wm_opacity", tk.DoubleVar), 0.1, 1.0, 2, 1, None, "{:.2f}")
+        self.slider(body, "Ukuran watermark", V("wm_size", tk.IntVar), 24, 120, 3, 0, 96)
+
+        body = self.card(left, "Logo & efek", "", 4)
         lf = ctk.CTkFrame(body, fg_color="transparent")
         lf.grid_columnconfigure(0, weight=1)
         self.entry(lf, V("logo_path"), "(tanpa logo)").grid(row=0, column=0, sticky="ew")
@@ -414,10 +426,10 @@ class App(ctk.CTk):
         ctk.CTkLabel(right, text="Pratinjau", font=font(15, "bold"), text_color=TEXT).pack(pady=(18, 0))
         ctk.CTkLabel(right, text="Klik sel untuk memindahkan", font=font(12), text_color=MUTED).pack(pady=(0, 10))
         self.target_var = tk.StringVar(value="Subtitle")
-        sg = ctk.CTkSegmentedButton(right, values=["Subtitle", "Hook", "Logo"], variable=self.target_var, height=34,
+        sg = ctk.CTkSegmentedButton(right, values=["Subtitle", "Hook", "Logo", "Badge", "Mark"], variable=self.target_var, height=34,
                                     fg_color=FIELD, selected_color=ACCENT, selected_hover_color=ACCENT_H,
                                     unselected_color=FIELD, font=font(12, "bold"),
-                                    command=lambda v: (self.grid_target.set({"Subtitle": "sub", "Hook": "hook", "Logo": "logo"}[v]),
+                                    command=lambda v: (self.grid_target.set({"Subtitle": "sub", "Hook": "hook", "Logo": "logo", "Badge": "badge", "Mark": "mark"}[v]),
                                                        self._draw_preview()))
         sg.pack(padx=18)
         self.cv = tk.Canvas(right, width=PW + 24, height=PH + 24, bg=CARD, highlightthickness=0)
@@ -425,7 +437,7 @@ class App(ctk.CTk):
         self.cv.bind("<Button-1>", self._on_canvas)
         self.cap = ctk.CTkLabel(right, text="", font=font(11), text_color=MUTED)
         self.cap.pack(pady=(0, 18))
-        for name in ("sub_size", "hook_size", "logo_scale", "sub_uppercase"):
+        for name in ("sub_size", "hook_size", "logo_scale", "sub_uppercase", "badge_text", "badge_sub", "wm_text", "wm_size"):
             self.sv[name].trace_add("write", lambda *_: self._draw_preview())
         for v in (self.v_anim, self.v_hookstyle):
             v.trace_add("write", lambda *_: self._draw_preview())
@@ -471,7 +483,7 @@ class App(ctk.CTk):
             return
         t = self.grid_target.get()
         rows = 3 if t == "logo" else 5
-        setattr(self.st, {"sub": "sub_pos", "hook": "hook_pos", "logo": "logo_pos"}[t],
+        setattr(self.st, POSATTR[t],
                 [min(int(x / PW * 3), 2), min(int(y / PH * rows), rows - 1)])
         self._draw_preview()
 
@@ -526,7 +538,7 @@ class App(ctk.CTk):
             c.create_line(ox + PW * i / cols, oy, ox + PW * i / cols, oy + PH, fill="#8B91A8", dash=(2, 5))
         for j in range(1, rows):
             c.create_line(ox, oy + PH * j / rows, ox + PW, oy + PH * j / rows, fill="#8B91A8", dash=(2, 5))
-        pos = getattr(s, {"sub": "sub_pos", "hook": "hook_pos", "logo": "logo_pos"}[t])
+        pos = getattr(s, POSATTR[t])
         c.create_rectangle(ox + PW * pos[0] / cols + 2, oy + PH * pos[1] / rows + 2, ox + PW * (pos[0] + 1) / cols - 2,
                            oy + PH * (pos[1] + 1) / rows - 2, outline=ACCENT, width=2)
         sc = PW / 1080
@@ -550,6 +562,15 @@ class App(ctk.CTk):
             c.create_rectangle(sx - PW * 0.2, sy - fs * 0.9, sx + PW * 0.2, sy + fs * 0.9, fill=s.sub_box, outline="")
         self._stroke_text(sx, sy, txt, fs, s.sub_active if anim in ("pop", "glow", "emphasis") else s.sub_fill,
                           s.sub_inner, s.sub_outer, max(1, s.sub_inner_w // 3), max(1, s.sub_outer_w // 3))
+        # badge & watermark
+        bx, by = ox + (s.badge_pos[0] + 0.5) / 3 * PW, oy + (s.badge_pos[1] + 0.5) / 5 * PH
+        bx = {0: ox + 10, 1: bx - 52, 2: ox + PW - 114}[s.badge_pos[0]]
+        c.create_rectangle(bx, by - 8, bx + 18, by + 8, fill="#E61A1A", outline="")
+        c.create_polygon(bx + 6, by - 4, bx + 6, by + 4, bx + 12, by, fill="white")
+        c.create_text(bx + 24, by - 4, text=(s.badge_text or "WATCH FULL VIDEO")[:18], fill="white", anchor="w", font=("Arial", 6, "bold"))
+        c.create_text(bx + 24, by + 5, text=(s.badge_sub or "channel")[:18], fill="#D8D8D8", anchor="w", font=("Arial", 5))
+        wx, wy = ox + (s.wm_pos[0] + 0.5) / 3 * PW, oy + (s.wm_pos[1] + 0.5) / 5 * PH
+        c.create_text(wx, wy, text=(s.wm_text or "WATERMARK")[:16], fill="#C9CCD6", font=("Arial", max(int(s.wm_size * PW / 1080 * 0.75), 6), "bold"))
         # logo
         lx, ly = ox + (s.logo_pos[0] + 0.5) / 3 * PW, oy + (s.logo_pos[1] + 0.5) / 3 * PH
         ls = self.sv["logo_scale"].get() * PW

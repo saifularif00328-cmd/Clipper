@@ -212,3 +212,13 @@ def test_shots_zoom_alternates():
     st = Style(fx_shots=True, fx_slowzoom=False)
     z = zoom_series(int(ws[-1].end * 30) + 5, 30, ws, st)
     assert z.min() >= 1.0 and z.max() > 1.4 and (np.abs(np.diff(z)) < 0.2).all()
+
+
+def test_branding_overlays():
+    ws = mk("tes badge dan watermark", 0.0)
+    st = Style(badge_enabled=True, badge_sub="Channel Saya", wm_enabled=True, wm_text="CHANNEL+", sub_enabled=False,
+               fx_progress=False)
+    text, _ = subtitles.build_ass(ws, st, 1080, 1920, 5.0, "", 3.0)
+    assert "WATCH FULL VIDEO" in text and "Channel Saya" in text and "CHANNEL+" in text
+    assert "Style: Plain" in text and "\\p1" in text
+    assert "Channel" not in subtitles.build_ass(ws, Style(sub_enabled=False), 1080, 1920, 5.0)[0]

@@ -234,7 +234,7 @@ def finish_render(src: Path, clip: Clip, prep: dict, rwords: List[Word], st: Sty
     zoom = zoom_series(max(len(cx), n_est), fps, rwords, st)
 
     ass_name = fontsdir_rel = None
-    if st.sub_enabled or (st.hook_enabled and hook_text) or st.fx_progress:
+    if st.sub_enabled or (st.hook_enabled and hook_text) or st.fx_progress or st.badge_enabled or st.wm_enabled:
         text, fdir = build_ass(rwords, st, W, H, duration, hook_text if st.hook_enabled else "",
                                hook_seconds)
         ass_name = f"clip{clip.id}.ass"

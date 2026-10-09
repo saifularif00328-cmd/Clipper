@@ -321,6 +321,39 @@ def hook_events(text: str, st: Style, W: int, H: int, m: Measurer, seconds: floa
     return styles, ev
 
 
+def overlay_events(st: Style, W: int, H: int, duration: float) -> Tuple[str, str]:
+    """Badge 'WATCH FULL VIDEO + channel' dan watermark teks transparan. Return (styles, events)."""
+    ev, styles = "", ""
+    fnt = Measurer(st.sub_font, 30)
+    styles += (f"Style: Plain,{fnt.ass_name},30,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,"
+               "0,0,0,0,100,100,0,0,1,2,1,7,0,0,0,1\n")
+    end = duration + 0.1
+    if st.badge_enabled and (st.badge_text or st.badge_sub):
+        t1, t2 = _clean(st.badge_text.upper()), _clean(st.badge_sub)
+        m1, m2 = Measurer(st.sub_font, 26), Measurer(st.sub_font, 23)
+        icon_w, icon_h, gap = 50, 36, 12
+        tw = max(m1.width(t1), m2.width(t2) if t2 else 0)
+        total = icon_w + gap + tw
+        cx, cy = grid_xy(st.badge_pos[0], st.badge_pos[1], 3, 5, W, H)
+        x0 = {0: W * 0.04, 1: cx - total / 2, 2: W * 0.96 - total}[st.badge_pos[0]]
+        y0 = cy - icon_h / 2
+        ev += _ev(3, 0, end, "Plain", f"{{\\an7\\pos({x0:.1f},{y0:.1f})\\1c&H1A1AE6&\\bord0\\shad0\\p1}}"
+                  f"m 8 0 l {icon_w - 8} 0 {icon_w} 8 {icon_w} {icon_h - 8} {icon_w - 8} {icon_h} 8 {icon_h} 0 {icon_h - 8} 0 8")
+        tx, ty = x0 + (icon_w - 16) / 2 + 4, y0 + icon_h / 2
+        ev += _ev(4, 0, end, "Plain", f"{{\\an7\\pos({tx - 4:.1f},{ty - 9:.1f})\\1c&HFFFFFF&\\bord0\\shad0\\p1}}"
+                  "m 0 0 l 18 9 0 18")
+        txt = f"{{\\fs26\\b1}}{t1}"
+        if t2:
+            txt += f"\\N{{\\fs23\\b0\\1c&HD8D8D8&}}{t2}"
+        ev += _ev(4, 0, end, "Plain", f"{{\\an4\\pos({x0 + icon_w + gap:.1f},{y0 + icon_h / 2 + (11 if t2 else 0):.1f})}}{txt}")
+    if st.wm_enabled and st.wm_text.strip():
+        x, y = grid_xy(st.wm_pos[0], st.wm_pos[1], 3, 5, W, H)
+        a = int(round((1 - max(0.0, min(1.0, st.wm_opacity))) * 255))
+        ev += _ev(2, 0, end, "Plain", f"{{\\an5\\pos({x:.1f},{y:.1f})\\fs{st.wm_size}\\b1\\bord0\\shad0"
+                  f"\\1a&H{a:02X}&}}{_clean(st.wm_text)}")
+    return styles, ev
+
+
 def progress_bar(duration: float, W: int, H: int) -> str:
     ms = int(duration * 1000)
     return _ev(9, 0, duration + 0.1, "Bar",
@@ -335,7 +368,10 @@ def build_ass(words: List[Word], st: Style, W: int, H: int, duration: float,
     hs, he = ("", "")
     if st.hook_enabled and hook_text:
         hs, he = hook_events(hook_text, st, W, H, m, hook_seconds)
-    # sisipkan style hook sebelum [Events]
+    os_, oe = overlay_events(st, W, H, duration)
+    hs += os_
+    he += oe
+    # sisipkan style hook/overlay sebelum [Events]
     head = head.replace("\n[Events]", hs + "\n[Events]", 1) if hs else head
     body = subtitle_events(words, st, W, H, m) if st.sub_enabled else ""
     bar = progress_bar(duration, W, H) if st.fx_progress else ""
