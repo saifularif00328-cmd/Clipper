@@ -179,3 +179,15 @@ def test_analyze_writes_and_reuses_cache(tmp_path, monkeypatch):
     p3 = Pipeline.load_cache(p1.list_file)
     assert len(p3.words) == len(ws) and p3.clips[0].id == p1.clips[0].id and p3.lang == "id"
     assert safe_name('a/b:c*?"d') == "abcd"
+
+
+def test_ytdlp_override_is_used(tmp_path, monkeypatch):
+    import sys
+    from clipper import media, paths
+    monkeypatch.setattr(paths, "data_dir", lambda: tmp_path)
+    pkg = tmp_path / "ytdlp_update" / "yt_dlp"
+    pkg.mkdir(parents=True)
+    (pkg / "__init__.py").write_text("")
+    (pkg / "version.py").write_text("__version__ = '2099.01.01'\n")
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    assert media.ytdlp_version() == "2099.01.01"

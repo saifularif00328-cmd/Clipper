@@ -127,7 +127,11 @@ class App(ctk.CTk):
         self.btn_an = ctk.CTkButton(b, text="Analisis Video", height=40, command=self._analyze)
         self.btn_an.pack(side="left", padx=(0, 10))
         ctk.CTkButton(b, text="Muat list_clip.json (cache)", height=40, fg_color="#444",
-                      command=self._load_cache).pack(side="left")
+                      command=self._load_cache).pack(side="left", padx=(0, 10))
+        ctk.CTkButton(b, text="Perbarui yt-dlp", height=40, fg_color="#444",
+                      command=self._update_ytdlp).pack(side="left")
+        ctk.CTkLabel(tab, text="Jika unduhan YouTube gagal/ditolak, klik 'Perbarui yt-dlp' lalu coba lagi.",
+                     text_color="gray").grid(row=2, column=0, columnspan=3, sticky="w", padx=12)
 
     # ------------------------------------------------------------ tab 2
     def _tab_clips(self, tab):
@@ -458,6 +462,13 @@ class App(ctk.CTk):
             self.pipe = Pipeline(self.cfg, self._log, self._prog)
             proj = self.pipe.analyze(self.v_src.get())
             self.q.put(("project", proj))
+        self._start(job)
+
+    def _update_ytdlp(self):
+        from .media import update_ytdlp
+
+        def job():
+            update_ytdlp(self._log)
         self._start(job)
 
     def _load_cache(self):

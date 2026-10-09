@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import sys
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -44,8 +45,59 @@ def is_url(s: str) -> bool:
     return bool(re.match(r"^https?://", s.strip(), re.I))
 
 
+def _ytdlp_override_dir() -> Path:
+    return paths.data_dir() / "ytdlp_update"
+
+
+def _use_ytdlp_override() -> None:
+    """Pakai yt-dlp hasil pembaruan (jika ada) di atas versi yang dibundel."""
+    d = _ytdlp_override_dir()
+    if (d / "yt_dlp").is_dir() and str(d) not in sys.path:
+        sys.path.insert(0, str(d))
+        for m in [m for m in sys.modules if m == "yt_dlp" or m.startswith("yt_dlp.")]:
+            del sys.modules[m]
+
+
+def ytdlp_version() -> str:
+    _use_ytdlp_override()
+    try:
+        from yt_dlp.version import __version__
+        return __version__
+    except Exception:
+        return "tidak terpasang"
+
+
+def update_ytdlp(log: LogFn = print) -> str:
+    """Unduh yt-dlp terbaru dari PyPI (wheel = zip berisi python murni), tanpa butuh pip."""
+    import io
+    import shutil
+    import urllib.request
+    import zipfile
+
+    log(f"yt-dlp saat ini: {ytdlp_version()}")
+    with urllib.request.urlopen("https://pypi.org/pypi/yt-dlp/json", timeout=30) as r:
+        meta = json.loads(r.read())
+    latest = meta["info"]["version"]
+    wheel = next(u for u in meta["urls"] if u["filename"].endswith("-py3-none-any.whl"))
+    log(f"Mengunduh yt-dlp {latest}...")
+    with urllib.request.urlopen(wheel["url"], timeout=120) as r:
+        data = r.read()
+    tmp = _ytdlp_override_dir().with_name("ytdlp_update_tmp")
+    shutil.rmtree(tmp, ignore_errors=True)
+    with zipfile.ZipFile(io.BytesIO(data)) as z:
+        z.extractall(tmp)
+    shutil.rmtree(_ytdlp_override_dir(), ignore_errors=True)
+    tmp.rename(_ytdlp_override_dir())
+    for m in [m for m in sys.modules if m == "yt_dlp" or m.startswith("yt_dlp.")]:
+        del sys.modules[m]
+    _use_ytdlp_override()
+    log(f"yt-dlp diperbarui ke {ytdlp_version()}.")
+    return latest
+
+
 def download_video(url: str, out_dir: Path, log: LogFn = print, progress=None) -> Path:
     """Unduh video YouTube (maks 1080p, mp4) memakai yt-dlp."""
+    _use_ytdlp_override()
     import yt_dlp
 
     out_dir.mkdir(parents=True, exist_ok=True)
