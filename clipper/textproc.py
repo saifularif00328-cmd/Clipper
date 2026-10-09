@@ -140,3 +140,14 @@ def remap_words(words: List[Word], segments, cut_fillers: bool = True) -> List[W
             continue
         out.append(Word(w.text, s, max(e, s + 0.05)))
     return out
+
+
+def clip_text(words: List[Word], start: float, end: float, cut_fillers: bool = True) -> str:
+    """Teks klip untuk disunting: satu kalimat per baris, filler dibuang."""
+    ws = [w for w in words_in(words, start, end) if not (cut_fillers and is_filler(w))]
+    if not ws:
+        return ""
+    lines = []
+    for a, b in split_sentences(ws):
+        lines.append(" ".join(w.text for w in ws[a:b + 1]))
+    return "\n".join(lines)

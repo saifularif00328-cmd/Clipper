@@ -146,6 +146,12 @@ class Pipeline:
         return heat
 
     @staticmethod
+    def apply_override(clip: Clip, rwords: List[Word]) -> List[Word]:
+        """Terapkan teks hasil sunting manual ke kata ber-timing (difflib menjaga sinkronisasi)."""
+        txt = " ".join((clip.transcript_override or "").split())
+        return ai.realign(rwords, txt) if txt else rwords
+
+    @staticmethod
     def zip_results(proj: Project) -> Path:
         """Kemas semua hasil (mp4, thumbnail, caption) ke satu file ZIP."""
         import zipfile
@@ -176,7 +182,8 @@ class Pipeline:
         out_dir.mkdir(exist_ok=True)
         prep = prepare_clip(proj.video, clip, proj.words, st, work, self.log)
         out = out_dir / f"preview_clip{clip.id:02d}.mp4"
-        finish_render(proj.video, clip, prep, prep["rwords"], st, out, work, None, st.hook_seconds, clip.hook,
+        finish_render(proj.video, clip, prep, self.apply_override(clip, prep["rwords"]), st, out, work, None,
+                      st.hook_seconds, clip.hook,
                       self.log, lambda p: self.progress(p, f"Pratinjau klip {clip.id}"), quick=True)
         return out
 
@@ -203,12 +210,15 @@ class Pipeline:
 
             self.log(f"Klip {clip.id}: {clip.title}")
             prep = prepare_clip(proj.video, clip, proj.words, st, work, self.log)
-            rwords, c = prep["rwords"], clip
+            rwords, c = self.apply_override(clip, prep["rwords"]), clip
+            edited = bool((clip.transcript_override or "").strip())
+            if edited:
+                self.log("  Memakai teks subtitle hasil sunting manual.")
             if gem:
                 try:
                     self.log("  Merapikan transkrip / menerjemahkan dengan Gemini...")
                     rwords, c = ai.polish_and_translate(gem, clip, rwords, proj.lang, cfg.target_lang,
-                                                        cfg.use_gemini_polish)
+                                                        cfg.use_gemini_polish and not edited)
                 except Exception as e:
                     self.log(f"  ! Gemini gagal ({e}); memakai teks asli.")
             elif cfg.target_lang and cfg.target_lang != proj.lang:

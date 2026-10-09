@@ -30,6 +30,7 @@ class Clip:
     score_value: float = 0.0
     score_trend: float = 0.0
     reason: str = ""
+    transcript_override: str = ""   # teks subtitle hasil sunting manual (timing disamakan otomatis)
     selected: bool = True
 
     @property

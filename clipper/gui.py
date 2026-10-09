@@ -18,7 +18,7 @@ from .models import Style
 from .pipeline import Cancelled, Pipeline, Project
 from .presets import PRESETS
 from .subtitles import list_fonts
-from .textproc import fmt_time
+from .textproc import clip_text, fmt_time
 
 # ---- tema -------------------------------------------------------------------------------
 BG, SIDEBAR, CARD, BORDER = "#0E1016", "#141722", "#1A1E2C", "#272C40"
@@ -423,8 +423,19 @@ class App(ctk.CTk):
             mid = ctk.CTkFrame(card, fg_color="transparent")
             mid.grid(row=0, column=2, sticky="nsew", pady=14)
             mid.grid_columnconfigure((0, 1), weight=1, uniform="t")
-            ctk.CTkLabel(mid, text=f"Klip {c.id}", font=font(15, "bold"), text_color=TEXT, anchor="w").grid(
-                row=0, column=0, sticky="w")
+            head = ctk.CTkFrame(mid, fg_color="transparent")
+            head.grid(row=0, column=0, columnspan=2, sticky="ew")
+            ctk.CTkLabel(head, text=f"Urutan {r + 1}  \u2022  Klip {c.id}", font=font(15, "bold"), text_color=TEXT,
+                         anchor="w").pack(side="left")
+            if (c.transcript_override or "").strip():
+                ctk.CTkLabel(head, text=" teks diedit ", font=font(10, "bold"), text_color="#0E1016", fg_color=WARN,
+                             corner_radius=6, height=20).pack(side="left", padx=10)
+            last = len(self.proj.clips) - 1
+            for txt_, d_, ok_ in (("\u25bc", 1, r < last), ("\u25b2", -1, r > 0)):
+                b_ = self.btn(head, txt_, lambda i=r, d=d_: self._move_clip(i, d), width=34, height=28)
+                b_.pack(side="right", padx=(4, 14 if d_ == -1 else 0))
+                if not ok_:
+                    b_.configure(state="disabled", fg_color=FIELD)
             title, hook = tk.StringVar(value=c.title), tk.StringVar(value=c.hook)
             self.entry(mid, title, "Judul").grid(row=1, column=0, columnspan=2, sticky="ew", padx=(0, 14), pady=(6, 6))
             self.entry(mid, hook, "Hook / teks stop-scroll").grid(row=2, column=0, columnspan=2, sticky="ew", padx=(0, 14), pady=(0, 8))
@@ -440,8 +451,10 @@ class App(ctk.CTk):
             if c.reason:
                 ctk.CTkLabel(mid, text=c.reason, font=font(12), text_color=MUTED, anchor="w", wraplength=520,
                              justify="left").grid(row=4, column=0, columnspan=2, sticky="w", pady=(0, 6))
-            self.btn(mid, "\u25b6  Pratinjau cepat", lambda cl=c: self._preview(cl), width=160, height=34).grid(
-                row=5, column=0, sticky="w", pady=(4, 0))
+            bt = ctk.CTkFrame(mid, fg_color="transparent")
+            bt.grid(row=5, column=0, columnspan=2, sticky="w", pady=(4, 0))
+            self.btn(bt, "\u25b6  Pratinjau cepat", lambda cl=c: self._preview(cl), width=160, height=34).pack(side="left", padx=(0, 10))
+            self.btn(bt, "\u270e  Edit teks subtitle", lambda cl=c: self._edit_text(cl), width=180, height=34).pack(side="left")
             self._score_panel(card, c).grid(row=0, column=3, padx=(8, 20), pady=16, sticky="n")
             self.clip_rows.append((c, sel, title, hook, sv, ev))
         self.clip_info.configure(text=f"{len(self.proj.clips)} klip  \u2022  {self.proj.video.name}")
@@ -486,6 +499,52 @@ class App(ctk.CTk):
         c = self.cfg
         return {"count": c.clip_count, "min": c.min_sec, "max": c.max_sec, "model": c.gemini_model,
                 "whisper": c.whisper_model, "prompt": c.clip_prompt.strip()}
+
+    def _move_clip(self, i, d):
+        if not self.proj:
+            return
+        self._sync_clips()
+        j = i + d
+        cl = self.proj.clips
+        if 0 <= j < len(cl):
+            cl[i], cl[j] = cl[j], cl[i]
+            self._fill_clips()
+
+    def _edit_text(self, clip):
+        """Editor teks subtitle per klip: kata diubah bebas, timing disamakan otomatis saat render."""
+        self._sync_clips()
+        default = clip_text(self.proj.words, clip.start, clip.end)
+        win = ctk.CTkToplevel(self, fg_color=BG)
+        win.title(f"Edit teks subtitle \u2013 Klip {clip.id}")
+        win.geometry("760x560")
+        win.transient(self)
+        win.after(150, lambda: (win.grab_set(), win.focus_force()))
+        ctk.CTkLabel(win, text=f"Teks subtitle \u2013 Klip {clip.id}", font=font(18, "bold"), text_color=TEXT).pack(
+            anchor="w", padx=24, pady=(20, 2))
+        ctk.CTkLabel(win, text="Ubah kata seperlunya (typo, nama, istilah). Jumlah kata boleh berbeda; "
+                     "timing disesuaikan otomatis.", font=font(12), text_color=MUTED, wraplength=700,
+                     justify="left").pack(anchor="w", padx=24)
+        box = ctk.CTkTextbox(win, fg_color=FIELD, border_width=1, border_color=BORDER, corner_radius=12,
+                             font=font(14), text_color=TEXT, wrap="word")
+        box.pack(fill="both", expand=True, padx=24, pady=14)
+        box.insert("1.0", (clip.transcript_override or "").strip() or default)
+        row = ctk.CTkFrame(win, fg_color="transparent")
+        row.pack(fill="x", padx=24, pady=(0, 20))
+
+        def save():
+            txt = box.get("1.0", "end").strip()
+            same = " ".join(txt.split()) == " ".join(default.split())
+            clip.transcript_override = "" if same else txt
+            win.destroy()
+            self._fill_clips()
+
+        def reset():
+            box.delete("1.0", "end")
+            box.insert("1.0", default)
+
+        self.btn(row, "Simpan", save, "primary", width=110).pack(side="left", padx=(0, 10))
+        self.btn(row, "Kembalikan ke asli", reset, width=170).pack(side="left", padx=(0, 10))
+        self.btn(row, "Batal", win.destroy, width=90).pack(side="left")
 
     def _preview(self, clip):
         if not self.proj:

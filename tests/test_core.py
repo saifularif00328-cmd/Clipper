@@ -358,3 +358,19 @@ def test_compile_real_clips(tmp_path):
     assert abs(info["duration"] - (9 - 2 * 0.5)) < 0.25 and info["has_audio"] and info["width"] == 320
     single = compile_clips(clips[:1], tmp_path / "s.mp4")
     assert single.exists()
+
+
+def test_clip_text_and_override_applied():
+    from clipper.pipeline import Pipeline
+    from clipper.textproc import clip_text
+    ws = mk("halo eee semua apa kabar. baik baik saja kok.", 0.0)
+    txt = clip_text(ws, 0.0, ws[-1].end)
+    assert txt.split("\n") == ["halo semua apa kabar.", "baik baik saja kok."]   # filler dibuang, 1 kalimat/baris
+    c = Clip(1, 0.0, ws[-1].end)
+    rw = [w for w in ws if w.text != "eee"]
+    assert Pipeline.apply_override(c, rw) == rw                                  # tanpa sunting: tidak berubah
+    c.transcript_override = "halo semua apa kabar Anda.\nbaik saja kok."
+    out = Pipeline.apply_override(c, rw)
+    assert [w.text for w in out][:5] == ["halo", "semua", "apa", "kabar", "Anda."]
+    assert all(out[i].start <= out[i + 1].start for i in range(len(out) - 1))
+    assert Clip.from_dict(c.to_dict()).transcript_override == c.transcript_override   # tersimpan di cache
