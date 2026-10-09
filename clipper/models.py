@@ -1,0 +1,105 @@
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass, field
+from typing import Optional
+
+
+@dataclass
+class Word:
+    text: str
+    start: float
+    end: float
+
+    def to_dict(self):
+        return asdict(self)
+
+
+@dataclass
+class Clip:
+    id: int
+    start: float
+    end: float
+    title: str = ""
+    hook: str = ""
+    thumb_text: str = ""
+    caption: str = ""
+    hashtags: list = field(default_factory=list)
+    score: float = 0.0
+    reason: str = ""
+    selected: bool = True
+
+    @property
+    def duration(self) -> float:
+        return self.end - self.start
+
+    def to_dict(self):
+        return asdict(self)
+
+    @staticmethod
+    def from_dict(d: dict) -> "Clip":
+        keys = Clip.__dataclass_fields__.keys()
+        return Clip(**{k: v for k, v in d.items() if k in keys})
+
+
+@dataclass
+class Style:
+    """Semua pengaturan tampilan & render. Disimpan ke settings.json."""
+    # layout
+    layout: str = "face"            # face | center | blur
+    out_width: int = 1080
+    out_height: int = 1920
+    fps: int = 30
+    # subtitle
+    sub_enabled: bool = True
+    sub_font: str = "Poppins ExtraBold"
+    sub_size: int = 84
+    sub_anim: str = "pop"           # pop | karaoke | glow | keyword | plain
+    sub_fill: str = "#FFFFFF"
+    sub_active: str = "#FFE600"
+    sub_inner: str = "#000000"
+    sub_outer: str = "#6A1BFF"
+    sub_inner_w: int = 6
+    sub_outer_w: int = 8
+    sub_box: str = "#FF2D55"
+    sub_glow: str = "#00E5FF"
+    sub_uppercase: bool = True
+    sub_max_words: int = 4
+    sub_pos: list = field(default_factory=lambda: [1, 3])   # [kolom 0-2, baris 0-4]
+    keywords: str = ""              # dipisah koma
+    keyword_color: str = "#39FF14"
+    # hook
+    hook_enabled: bool = True
+    hook_pos: list = field(default_factory=lambda: [1, 0])
+    hook_style: str = "yellow"      # yellow | red | outline
+    hook_size: int = 78
+    hook_seconds: float = 3.0
+    hook_voice: bool = False
+    hook_voice_name: str = ""       # kosong = otomatis sesuai bahasa
+    # logo
+    logo_path: str = ""
+    logo_pos: list = field(default_factory=lambda: [2, 0])  # [kolom 0-2, baris 0-2]
+    logo_scale: float = 0.16
+    logo_opacity: float = 0.9
+    # efek
+    fx_punch: bool = True
+    fx_slowzoom: bool = True
+    fx_progress: bool = True
+    fx_fade: bool = True
+    fx_grade: bool = True
+    fx_vignette: bool = False
+    # audio / pemotongan
+    cut_silence: bool = True
+    silence_gap: float = 0.45
+    remove_fillers: bool = True
+    loudnorm: bool = True
+
+    def to_dict(self):
+        return asdict(self)
+
+    @staticmethod
+    def from_dict(d: dict) -> "Style":
+        s = Style()
+        for k, v in (d or {}).items():
+            if hasattr(s, k):
+                setattr(s, k, v)
+        return s

@@ -1,0 +1,9 @@
+customtkinter>=5.2
+numpy>=1.26
+opencv-python-headless>=4.9
+pillow>=10.0
+mediapipe>=0.10.14
+faster-whisper>=1.0.3
+google-genai>=1.0
+edge-tts>=6.1
+yt-dlp>=2024.8

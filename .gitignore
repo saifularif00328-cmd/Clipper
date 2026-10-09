@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+build/
+dist/
+*.spec.bak
+Clipper_output/
+assets/ffmpeg/
+.pytest_cache/
