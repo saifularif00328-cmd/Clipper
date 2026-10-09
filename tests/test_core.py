@@ -332,3 +332,29 @@ def test_zip_results(tmp_path):
     import zipfile
     z = Pipeline.zip_results(Project(Path("v.mp4"), tmp_path, "id", []))
     assert sorted(zipfile.ZipFile(z).namelist()) == ["a.mp4", "a.txt", "a_thumb_vertical.jpg"]
+
+
+def test_compilation_graph_offsets():
+    from clipper.compilation import build_graph
+    g = build_graph([10.0, 8.0, 6.0], 0.5, True)
+    assert "offset=9.500" in g and "offset=17.000" in g      # 10-0.5 ; (10+8-0.5)-0.5
+    assert g.count("acrossfade") == 2 and "[vout]" in g and "[aout]" in g
+    assert "acrossfade" not in build_graph([5.0, 5.0], 0.4, False)
+
+
+def test_compile_real_clips(tmp_path):
+    import subprocess
+    from clipper.compilation import compile_clips
+    from clipper.media import probe
+    clips = []
+    for i, (col, hz) in enumerate((("red", 300), ("green", 500), ("blue", 700))):
+        f = tmp_path / f"c{i}.mp4"
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", f"color=c={col}:s=320x568:r=24:d=3",
+                        "-f", "lavfi", "-i", f"sine=frequency={hz}:d=3", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                        "-c:a", "aac", "-shortest", str(f)], check=True)
+        clips.append(f)
+    out = compile_clips(clips, tmp_path / "k.mp4", 0.5, "cpu")
+    info = probe(str(out))
+    assert abs(info["duration"] - (9 - 2 * 0.5)) < 0.25 and info["has_audio"] and info["width"] == 320
+    single = compile_clips(clips[:1], tmp_path / "s.mp4")
+    assert single.exists()

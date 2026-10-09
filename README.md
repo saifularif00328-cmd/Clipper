@@ -26,6 +26,7 @@ yang dikirim ke Gemini (opsional, API key gratis dari <https://aistudio.google.c
 | 18 | **Layout** | Face Tracking, Split Cam (wajah atas / konten bawah), Crop Tengah, Fit + Blur; rasio 9:16, 1:1, 16:9. |
 | 19 | **Akses YouTube** | Cookies (file / dari browser) dan proxy untuk unduhan; pembaruan yt-dlp dari dalam aplikasi. |
 | 20 | **Proyek & template** | Riwayat proyek, template merek tersimpan, pratinjau cepat, kemas ZIP, cadangan model Gemini otomatis. |
+| 21 | **Kompilasi gabungan** | Semua klip terpilih digabung jadi satu video dengan crossfade video + audio (opsional di halaman Ekspor); klip terpisah tetap disimpan. |
 | 14 | **Efek** | Zoom punch-in saat penekanan, slow zoom, progress bar, fade, color grade, vignette, latar blur. |
 
 ## Menjalankan dari source

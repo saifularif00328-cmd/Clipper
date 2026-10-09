@@ -242,4 +242,18 @@ class Pipeline:
                     self.log(f"  ! Thumbnail gagal: {e}")
             self.log(f"  Selesai: {out.name}")
             self.progress((n + 1) / total, f"Klip {clip.id} selesai")
+        if cfg.compile_clips and len(results) >= 2:
+            from .compilation import compile_clips
+            self._check()
+            self.progress(0.98, "Membuat kompilasi...")
+            self.log(f"Menggabungkan {len(results)} klip menjadi satu video kompilasi...")
+            comp = compile_clips(results, out_dir / "kompilasi_gabungan.mp4", cfg.compile_transition,
+                                 st.encoder, self.log)
+            titles = [c.title or f"Klip {c.id}" for c in clips]
+            (out_dir / "kompilasi_gabungan.txt").write_text(
+                "Kompilasi:\n" + "\n".join(f"{i}. {t}" for i, t in enumerate(titles, 1)) + "\n", encoding="utf-8")
+            self.log(f"  Selesai: {comp.name}")
+            results.append(comp)
+        elif cfg.compile_clips:
+            self.log("Kompilasi dilewati: pilih minimal 2 klip.")
         return results

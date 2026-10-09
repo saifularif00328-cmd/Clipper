@@ -22,6 +22,8 @@ class Settings:
     clip_prompt: str = ""             # instruksi kustom untuk pencarian klip
     use_gemini_polish: bool = True
     make_thumbnail: bool = True
+    compile_clips: bool = False       # buat juga satu video kompilasi dari semua klip terpilih
+    compile_transition: float = 0.4
     cookies_file: str = ""            # file cookies Netscape untuk YouTube
     cookies_browser: str = ""         # chrome | edge | firefox | brave ... (ambil cookies dari browser)
     proxy: str = ""

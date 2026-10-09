@@ -795,6 +795,11 @@ class App(ctk.CTk):
         self.switch(body, "Buat thumbnail otomatis (9:16 & 16:9)", self.v_th).grid(row=1, column=1, sticky="w", pady=6)
         self.v_gap = tk.DoubleVar(value=s.silence_gap)
         self.slider(body, "Jeda dianggap panjang (detik)", self.v_gap, 0.25, 1.2, 1, 0, None, "{:.2f}")
+        self.v_comp = tk.BooleanVar(value=c.compile_clips)
+        self.switch(body, "Buat juga video kompilasi gabungan (min. 2 klip)", self.v_comp).grid(
+            row=4, column=0, sticky="w", pady=(14, 0))
+        self.v_ctr = tk.DoubleVar(value=c.compile_transition)
+        self.slider(body, "Durasi transisi antar klip (detik)", self.v_ctr, 0.1, 1.0, 3, 1, None, "{:.2f}")
 
         body = self.card(pg, "Audio tambahan & performa", "Musik latar, efek suara hook, volume suara asli, dan encoder GPU.", 2)
         V = self._var
@@ -898,6 +903,7 @@ class App(ctk.CTk):
         c.proxy = self.v_proxy.get().strip()
         c.target_lang = LANGS[self.v_tl.get()]
         c.use_gemini_polish, c.make_thumbnail = self.v_polish.get(), self.v_th.get()
+        c.compile_clips, c.compile_transition = self.v_comp.get(), round(self.v_ctr.get(), 2)
         for name, v in self.sv.items():
             setattr(s, name, v.get())
         s.layout, s.sub_anim = LAYOUTS[self.v_layout.get()], ANIMS[self.v_anim.get()]
